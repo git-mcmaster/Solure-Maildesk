@@ -1,0 +1,4 @@
+# Copy this to .dev.vars for loopback-only local development.
+# No credentials are needed for local dry-run alerts.
+DEV_AUTH=true
+EMAIL_MODE=dry-run

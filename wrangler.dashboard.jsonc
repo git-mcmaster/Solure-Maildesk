@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "solure-maildesk",
+  "main": "src/server/dashboard.ts",
+  "compatibility_date": "2026-11-02",
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": { "directory": "./dist/client", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": true },
+  "d1_databases": [{ "binding": "DB", "database_name": "solure-maildesk", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
+  "vars": {
+    "OWNER_EMAIL": "elijah@soluredigitalworks.com",
+    "DASHBOARD_ORIGIN": "https://maildesk.soluredigitalworks.com",
+    "PIXEL_ORIGIN": "https://pixel.soluredigitalworks.com",
+    "EMAIL_MODE": "live"
+  },
+  "triggers": { "crons": ["* * * * *"] },
+  "observability": { "enabled": false }
+  // Add ACCESS_TEAM_DOMAIN and ACCESS_AUD after configuring owner-only Access.
+  // Add an EMAIL binding restricted to OWNER_EMAIL only after email onboarding.
+  // Keep dashboard Worker-level Access enabled for all traffic before release.
+}

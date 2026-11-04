@@ -1,0 +1,11 @@
+packages:
+  - .
+minimumReleaseAge: 1440
+onlyBuiltDependencies:
+  - esbuild
+  - workerd
+  - sharp
+overrides:
+  # Security patches for the stable local D1 emulator’s pinned dependencies.
+  'miniflare@4.20260730.0>undici': 7.30.1
+  'miniflare@4.20260730.0>sharp': 0.35.5

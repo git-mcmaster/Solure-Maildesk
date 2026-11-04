@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "solure-maildesk-pixel",
+  "main": "src/server/pixel.ts",
+  "compatibility_date": "2026-11-02",
+  "workers_dev": false,
+  "preview_urls": false,
+  "d1_databases": [{ "binding": "DB", "database_name": "solure-maildesk", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
+  "observability": { "enabled": false }
+  // This Worker must remain publicly accessible for email image loads.
+  // Attach only pixel.soluredigitalworks.com; do not protect it with Access.
+}
