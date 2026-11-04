@@ -4,7 +4,7 @@ Status: approved scope for local implementation; production deployment, DNS, liv
 
 ## Tracking and notification activation correction — November 4, 2026
 
-The owner reported that inactive pixels kept recording and that priming email alerts required too many steps. Confirmed causes were the public collector excluding only archived pixels, a separate global email preference left off by activation, and lifetime notification eligibility being consumed even when mail was disabled. This correction is in progress; release and production verification remain pending.
+The owner reported that inactive pixels kept recording and that priming email alerts required too many steps. Confirmed causes were the public collector excluding only archived pixels, a separate global email preference left off by activation, and lifetime notification eligibility being consumed even when mail was disabled. This correction is published, migrated and deployed. The 91-test suite, TypeScript, build, Worker bundles, CI, private populated-data rehearsal and controlled live inactive/start/stop/notification checks passed. The live image-load email was accepted on its first scheduled attempt; owner Inbox confirmation remains pending.
 
 Define inactive draft/paused/archived records as no new event capture, quota consumption or notification creation. Continue serving their harmless image so stopping tracking does not break an already-sent signature. Existing activity remains historical; earlier pre-activation events are explicitly labeled as the earlier behavior. Active capture, both PNG and GIF, uses the same atomic status gate and limits.
 

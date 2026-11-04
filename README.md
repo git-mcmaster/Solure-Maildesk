@@ -12,7 +12,7 @@ The November 4 update is published and deployed at https://maildesk.soluredigita
 
 The subsequent tracked-logo signature extension is published and deployed. All 79 tests and CI passed. The live preview, rich-text copying and one controlled logo-load event were verified. It adds no DNS change, database migration or service. Actual Outlook insertion, including Outlook on iPhone, still needs a received-message/source check.
 
-The tracking/notification activation correction is in progress. The workflow below describes the corrected implementation; publication, migration and live verification are pending.
+The tracking/notification activation correction is published, migrated and deployed, with 91/91 tests and CI passing. Inactive requests save nothing; one Start action enables tracking and email readiness. The controlled live load alert was accepted by the email service on its first scheduled attempt; owner inbox confirmation remains pending.
 
 ## What is included
 
@@ -26,7 +26,7 @@ The tracking/notification activation correction is in progress. The workflow bel
 - Optional private request details: connection IP, approximate location, network and reported client/device hints.
 - Cloudflare Access JWT verification, exact owner identity and same-origin mutations.
 
-The app does not read your Outlook mailbox. Recipient and message labels are manually entered. Actual Outlook image insertion and optional image-load email alerts still require their own user-controlled test. The separately tested scheduled report reached the owner’s Inbox.
+The app does not read your Outlook mailbox. Recipient and message labels are manually entered. Actual Outlook image insertion still requires its user-controlled test. The controlled image-load alert passed production dispatch; its Inbox confirmation is pending. The separately tested scheduled report reached the owner’s Inbox.
 
 ## Tracked-logo signature
 

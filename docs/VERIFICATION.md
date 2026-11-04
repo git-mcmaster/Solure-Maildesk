@@ -2,6 +2,14 @@
 
 ## Tracking activation correction — November 4, 2026
 
+Published source `083c0c7c06070bda0bdaccf09969619e08e1a0e1`, tree `db7d8651478a9f7c9e79976d7389b856687a116b`, matches the reviewed local source. [CI run 41822743342](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41822743342) passed. Remote `0006` and both Workers are deployed; internal version identifiers are recorded privately. Immediately afterward, the six pixels, 20 events, three notifications, saved report and email-off/repeat-off preferences remained unchanged.
+
+Live owner-interface test created a clearly labeled synthetic record. Preview/copy plus inactive GIF/PNG requests left it at zero. One Start enabled tracking and the shared email master; two controlled simultaneous loads produced two events and one pending notification. The normal background scheduler recorded service acceptance at **11:45:16 UTC** on its first attempt, with no error. Owner Inbox/Junk confirmation is pending; this is not a claimed inbox receipt. Stop left the record inactive; further GIF/PNG GETs returned 200 but left its two events and one notification unchanged. It was archived without deletion. Final totals were seven pixels, 22 events, four notifications and one report; all pre-existing records remain. Email alerts are now on, repeat alerts remain off, and the other previously active message remains active with a fresh future-only notification window as disclosed in the Start control. No old disabled notification was replayed.
+
+The deployed owner interface shows distinct tracking state, one prominent Start/Stop action, current-start delivery state and readable contact preview. Source-level tests cover restart, cleared history and cancellation races; no provider call already begun can be recalled. Phone-sized local UI checks are recorded below. Microsoft mail routing, DNS, Access, sender binding and paid-plan settings were unchanged.
+
+### Pre-release local checkpoint
+
 Local implementation is verified; source publication, remote migration, deployment and live acceptance remain pending at this checkpoint. The previous inactive-capture and separate email-priming behavior is superseded by the new contract in the implementation plan.
 
 - `node node_modules/vitest/vitest.mjs run`: **91/91** passed across three files, including inactive GIF/PNG capture, explicit atomic activation, concurrent first loads, restart/canceled queues, clear-history eligibility/cooldown, stale save/state races, sender failures, populated migration and retained report/retention coverage.
