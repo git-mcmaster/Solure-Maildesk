@@ -1,6 +1,30 @@
 # Verification record
 
-## 89-day reports — November 4, 2026
+## Report sender activation — November 4, 2026
+
+The owner explicitly approved the temporary Solure-only setup key after its broader Zone Settings Edit permission was explained. Source configuration `51f893e5677a73202410bf2d9ad202c50c74d859`, tree `6fb90ccdc58836b1901a44be57b4eb9e6855a29a`, matches the local configuration tree. [CI run 41808317650](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41808317650) completed successfully, including `pnpm check` (TypeScript, 62 tests, client build) and `pnpm bundle:check`. No application logic, dependencies or migration changed in this activation.
+
+| Check | Observed result |
+| --- | --- |
+| DNS preview and baseline | Saved a private baseline outside Git. Preview returned three MX and one SPF TXT, all at `notifications.soluredigitalworks.com`. |
+| Approved Routing setup | API accepted only the named notifications subdomain and reported it ready. Afterwards every pre-existing record’s type, name, content, priority, TTL and proxy setting matched the baseline. |
+| Additional provider-generated DNS | Cloudflare also added `cf2024-1._domainkey.soluredigitalworks.com`, its documented managed Routing DKIM selector; it was not in the preview. This is a fifth, root-level authentication addition, not a fully subdomain-only DNS change. Microsoft’s existing DKIM selectors were untouched. |
+| Parent Routing warning | The parent service reports a Microsoft apex MX/SPF mismatch while the notifications subdomain is ready. Microsoft’s records were intentionally retained; actual mail routing still uses its priority-zero MX. No attempt was made to make the parent warning green by replacing them. |
+| Temporary setup key | Revoked through the dashboard after setup; a direct verification request then returned HTTP 401 / Invalid API Token. Its owner-readable temporary local file was removed. No setup credential was committed. |
+| `node node_modules/wrangler/bin/wrangler.js deploy --dry-run --config wrangler.dashboard.jsonc --outdir dist/dashboard-worker` | Passed with the fixed-destination `EMAIL` binding and live From address. The first invocation also emitted a log-path permission warning; rerunning with temporary log/config paths passed without it. |
+| `node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.dashboard.jsonc` | Deployed to the existing dashboard hostname and minute cron. Public pixel code, database schema and Access controls were unchanged. Native sending no longer depends on the revoked setup key. |
+| Controlled production report | Queued one clearly labeled synthetic orphan report through `wrangler d1 execute ... --remote --file /tmp/maildesk-report-sender-smoke.sql --json`. No real pixel timestamps or history were changed. The ordinary minute cron marked it `sent` at 09:34:16 UTC / 4:34 AM EST on its first attempt with no error. |
+| Owner outcome | The owner confirmed the exact subject and test code `SOLURE-REPORT-20261104-A` arrived in **Inbox**. This establishes that specific receipt, not all future placement. |
+| Data preservation | Remote read-only count checks before and after kept four pixels, eight events and two existing notifications. Only the clearly labeled setup report was added. Existing optional image-load email alerts remain off. |
+| Live interface | The private Reports view displayed the accepted report and its expanded synthetic snapshot; the sender-unconfigured warning was gone. The owner Access gateway remained in place. |
+
+Cloudflare’s documented verified-destination path is free on all plans, including Routing-only configurations: [pricing](https://developers.cloudflare.com/email-service/platform/pricing/) and [send bindings](https://developers.cloudflare.com/email-service/configuration/send-bindings/). Its Routing DKIM selector is described in [email authentication](https://developers.cloudflare.com/email-service/concepts/email-authentication/). No paid plan was purchased. These references support the design; the actual bounded sender/queue/Inbox test above is the production evidence.
+
+Limitations: the controlled setup report did not age for 89 days, and its received authentication headers were not inspected. The real boundary logic is covered by local tests; a future real elapsed production boundary remains unobserved. Report `sent` always means provider acceptance; the owner’s Inbox confirmation applies specifically to this test. This activation does not establish Outlook image insertion, arbitrary recipient delivery, unique-human opens or future Inbox guarantees.
+
+## Historical report implementation and first deployment — November 4, 2026
+
+This checkpoint precedes sender activation. Its unconfigured-sender and unverified-Inbox statements describe that earlier point and are superseded by the activation evidence above.
 
 Implemented following the owner’s request for a report for every pixel at 89 days from creation, emailed to the fixed Solure owner address. The following table records local validation; publication and production evidence appear in the separate subsection below. Neither establishes actual processing after 89 elapsed days or inbox delivery. Earlier dated production evidence remains historical.
 
