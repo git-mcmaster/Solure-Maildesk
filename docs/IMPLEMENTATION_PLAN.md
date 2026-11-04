@@ -4,7 +4,7 @@ Status: approved scope for local implementation; production deployment, DNS, liv
 
 ## 89-day report extension — November 4, 2026
 
-The owner requested a report for every pixel at 89 elapsed days from creation, sent to `elijah@soluredigitalworks.com`. The extension is implemented locally and passed TypeScript plus all 62 backend/metadata tests. It is not yet published, migrated remotely or deployed. The dated original plan below remains context; this extension adds a mandatory report independent of the optional image-load email-alert preference.
+The owner requested a report for every pixel at 89 elapsed days from creation, sent to `elijah@soluredigitalworks.com`. The extension is published, migrated and deployed. All 62 backend/metadata tests, TypeScript, the build and bundles passed. The sender configuration subsequently passed complete CI and a controlled scheduled report reached the owner’s Inbox. A real elapsed 89-day boundary remains unobserved. The dated original plan below remains context; this extension adds a mandatory report independent of the optional image-load email-alert preference.
 
 Use a dedicated D1 snapshot/outbox table with one unique source-pixel key, immutable text, leased claims and bounded retries. Migration `0005` adds nullable per-pixel queue/acceptance markers and indexes so already-queued pixels and overdue-but-undelivered cleanup candidates do not cause repeated full scans. The minute scheduler queues at most 100 due reports, dispatches at most five, performs accepted-report-gated cleanup, then dispatches at most five ordinary load alerts. The measured busy path uses 40 D1 calls. Scheduling/backlogs can delay processing beyond the exact due instant.
 
@@ -16,9 +16,13 @@ Provider acceptance is not inbox proof. Unique snapshots and leases prevent norm
 
 Before release, export the production database privately and rehearse the additive `0005` migration on a disposable copy, then verify counts/settings. Suspend an older cron first if overdue unused pixels could be deleted during rollout. Deploy corrected code retaining permanent history **and** report-before-delete guards; older cleanup code is not an acceptable rollback. Restoring a database replaces newer data and needs separate approval. Snapshots accumulate against existing free quotas; no paid upgrade is authorized.
 
-The destination is verified, but production `EMAIL` binding and sender remain unconfigured. Email Sending’s UI is still Workers Paid-gated; apex routing onboarding was canceled without replacing Microsoft MX records. An API/subdomain-only free sending path is under investigation and has not established a working sender. Publication, CI, browser/live schedule checks and actual inbox delivery are separate evidence gates recorded in [VERIFICATION.md](VERIFICATION.md).
+The production `EMAIL` binding is restricted to the verified owner address and uses `reports@notifications.soluredigitalworks.com`. The approved Routing subdomain setup worked with existing free services; no paid upgrade was accepted. It added four notifications-subdomain records plus Cloudflare’s managed root-level Routing DKIM selector, while preserving every pre-existing DNS record. The temporary setup key was revoked and its local copy removed. A single clearly labeled synthetic report exercised the ordinary scheduled dispatcher and the owner confirmed Inbox arrival; its authentication headers were not inspected. Keep publication, CI, production dispatch and that specific inbox receipt distinct in [VERIFICATION.md](VERIFICATION.md).
 
-## Outcome and boundaries
+## Original November 2 plan — historical context
+
+The following original plan preserves the proposed architecture and pre-release status at that date. Current source, hosting and sender outcomes are recorded in the November 4 extension above and the release record.
+
+### Outcome and boundaries
 
 Build a private, responsive dashboard for Elijah to create one remotely hosted image per email, send through Outlook, label the image afterward, and review image-load activity. An image request is evidence of a request, not proof that a person read a message. Shared or forwarded messages cannot identify which person loaded their shared image. Image proxies, preloads, blocks and caches limit observations.
 
