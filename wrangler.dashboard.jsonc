@@ -11,13 +11,16 @@
   "d1_databases": [{ "binding": "DB", "database_name": "solure-maildesk", "database_id": "1e984554-9e0c-455c-91be-aefaae407324", "migrations_dir": "migrations" }],
   "vars": {
     "OWNER_EMAIL": "elijah@soluredigitalworks.com",
+    "EMAIL_MODE": "live",
+    "EMAIL_FROM": "reports@notifications.soluredigitalworks.com",
     "DASHBOARD_ORIGIN": "https://maildesk.soluredigitalworks.com",
     "PIXEL_ORIGIN": "https://pixel.soluredigitalworks.com",
     "ACCESS_TEAM_DOMAIN": "throbbing-morning-dbde.cloudflareaccess.com",
     "ACCESS_AUD": "b49980e485cb0713b18722945eb6913009dca5a90133f0f80b04232fc285cf5e"
   },
+  "send_email": [{ "name": "EMAIL", "destination_address": "elijah@soluredigitalworks.com" }],
   "triggers": { "crons": ["* * * * *"] },
   "observability": { "enabled": false }
-  // Add an EMAIL binding restricted to OWNER_EMAIL only after email onboarding.
+  // The native binding is restricted to the verified owner destination.
   // Owner-only hostname Access covers every path; alternate Worker URLs stay disabled.
 }
