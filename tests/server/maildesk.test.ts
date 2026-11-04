@@ -7,6 +7,7 @@ import { fetchDashboard, runScheduled } from '../../src/server/dashboard';
 import { dispatchNotifications, enforceRetention } from '../../src/server/notifications';
 import { fetchPixel } from '../../src/server/pixel';
 import { dispatchPixelReports, queuePixelReports } from '../../src/server/reports';
+import { imageAddresses } from '../../src/client/signature';
 import type { Bootstrap, Env, LoadEvent, LoadEventPage, Pixel, PixelPage, PixelReport, ReportPage, Settings } from '../../src/server/types';
 
 let mf: Miniflare;
@@ -58,6 +59,35 @@ function detailedRequest(pixel: Pixel, method = 'GET') {
 }
 
 describe('owner access and request validation', () => {
+  it('permits only the untracked logo preview on production HTML while keeping tracked image routes excluded', async () => {
+    const { privateKey, publicKey } = await generateKeyPair('RS256', { extractable: true });
+    const jwk = { ...await exportJWK(publicKey), kid: 'preview-policy-key', alg: 'RS256' };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ keys: [jwk] }), { headers: { 'Content-Type': 'application/json' } })));
+    const issuer = 'https://preview-policy-test.cloudflareaccess.com';
+    const production: Env = { ...env, DEV_AUTH: undefined, DASHBOARD_ORIGIN: 'https://maildesk.soluredigitalworks.com', PIXEL_ORIGIN: 'https://pixel.soluredigitalworks.com', ACCESS_TEAM_DOMAIN: 'preview-policy-test.cloudflareaccess.com', ACCESS_AUD: 'preview-policy-audience',
+      ASSETS: { fetch: vi.fn(async () => new Response('<!doctype html><html><body>Maildesk</body></html>', { headers: { 'Content-Type': 'text/html' } })) } as unknown as Fetcher };
+    const token = await new SignJWT({ email: env.OWNER_EMAIL }).setProtectedHeader({ alg: 'RS256', kid: 'preview-policy-key' }).setIssuer(issuer).setAudience(production.ACCESS_AUD!).setExpirationTime('5m').sign(privateKey);
+    const response = await fetchDashboard(new Request(production.DASHBOARD_ORIGIN, { headers: { 'Cf-Access-Jwt-Assertion': token } }), production);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('text/html');
+    expect(await response.text()).toContain('Maildesk');
+    const sources = response.headers.get('Content-Security-Policy')!.split(';').map((directive) => directive.trim()).find((directive) => directive.startsWith('img-src '))!.split(/\s+/u).slice(1);
+    const addresses = imageAddresses(`${production.PIXEL_ORIGIN}/p/${'a'.repeat(32)}.gif`);
+    expect(sources).toEqual(["'self'", 'data:', addresses.preview]);
+    expect(sources).not.toContain(new URL(addresses.preview).origin);
+    expect(sources).not.toContain(addresses.logo);
+    expect(sources).not.toContain(addresses.pixel);
+    expect(response.headers.get('Content-Security-Policy')).toContain("script-src 'self'");
+    expect(response.headers.get('X-Frame-Options')).toBe('DENY');
+    const prepare = vi.fn(() => { throw new Error('Preview must not query storage'); });
+    const image = await fetchPixel(new Request(addresses.preview), { ...production, DB: { prepare } as unknown as D1Database });
+    expect(image.status).toBe(200);
+    expect(image.headers.get('Content-Type')).toBe('image/png');
+    expect((await image.arrayBuffer()).byteLength).toBe(3201);
+    expect(prepare).not.toHaveBeenCalled();
+    expect((await fetchDashboard(new Request(production.DASHBOARD_ORIGIN), production)).status).toBe(401);
+  });
+
   it('fails closed without production Access configuration, even if local bypass is accidentally set', async () => {
     const response = await fetchDashboard(new Request('https://maildesk.soluredigitalworks.com/api/bootstrap'), { ...env, DASHBOARD_ORIGIN: 'https://maildesk.soluredigitalworks.com', DEV_AUTH: 'true' });
     expect(response.status).toBe(503);
