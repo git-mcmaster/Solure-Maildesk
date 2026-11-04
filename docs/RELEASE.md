@@ -1,39 +1,56 @@
 # Release runbook
 
-This file is a release plan, not evidence that any of these steps have happened. Production changes require the owner’s explicit approval. Keep the current Microsoft MX, SPF, DKIM, DMARC and public MTA-STS service intact.
+This runbook separates confirmed setup from remaining release checks. The owner authorized implementation and deployment; completion still requires the evidence below. Keep the current Microsoft MX, SPF, DKIM, DMARC and public MTA-STS service intact.
+
+## Confirmed setup — November 3, 2026
+
+- Source is published in the owner’s public [git-mcmaster/Solure-Maildesk repository](https://github.com/git-mcmaster/Solure-Maildesk). The owner deferred a visibility change; public visibility is not a release blocker.
+- Published source baseline `61e4b4a773de802c648aa80aafcaf624d7cacf7d` has tree `ca62a1476ee184aa819c4e16d7db86f94bad2d02`. Its 33 source paths and blob hashes, sizes and modes exactly match local source commit `a2a4bb47cb43ceba57b459746930881be5f44421`. This revision adds the production configuration and deployment evidence to that baseline; application code is unchanged.
+- [GitHub CI run 41767359458](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41767359458) passed TypeScript, all 24 backend tests, the client build and both Worker dry-run bundles on clean Ubuntu 24.04.
+- The current local recheck passed TypeScript, client build and both bundles. Local Miniflare/D1 initialization timed out before tests ran; the local `pnpm check` did not pass. Preserve this distinction from the successful CI run.
+- Zero Trust Free is active. An Access application for `maildesk.soluredigitalworks.com` allows exactly `elijah@soluredigitalworks.com`; email one-time PIN is enabled. The actual team hostname is `throbbing-morning-dbde.cloudflareaccess.com`.
+- No paid upgrade was accepted. Native email alerts remain unconfigured: this account’s Email Sending UI required Workers Paid. Root Email Routing onboarding proposed replacing Microsoft MX records and was canceled without changing those mail DNS records.
+- Account `2b6c3404db3df23a12558f1852bc221c` now has a dedicated D1 database, `solure-maildesk` / `1e984554-9e0c-455c-91be-aefaae407324`, created empty. Remote migrations `0001_initial.sql` and `0002_daily_counters.sql` both applied successfully.
+- Both bundles passed with the actual production identifiers. The dashboard configuration has the actual Access team/audience and no `DEV_AUTH`, `EMAIL_MODE` or email binding.
+- Dashboard version `47f1c3fa-b218-4a88-ba94-3340a3769fb9` is deployed at `maildesk.soluredigitalworks.com` with a once-per-minute scheduled trigger. Image Worker version `613db136-48a2-4c60-8d4a-bb744221cfbc` is deployed at `pixel.soluredigitalworks.com`.
+- Only those two new hostnames were added, both as proxied Worker custom domains. Independent public DNS-over-HTTPS confirmed the retained Microsoft MX at priority 0, SPF `~all`, both DKIM CNAMEs and DMARC quarantine with all three reporting destinations. `_mta-sts` ID is `20261103223633`; the existing HTTPS policy returned 200 with `mode: testing`, the Microsoft MX and `max_age: 86400`. No mail records or MTA-STS service were changed by this deployment.
+- Standard-Mozilla-user-agent checks passed for the unknown-token public GIF (GET 200, 42 bytes, 1×1, cache-prevention headers; HEAD 200, empty) and invalid image path (404). Unauthenticated `/`, `/api/bootstrap`, `/api/export.csv` and `/assets/index-BFM4bS7d.js` each returned a 302 to the exact Access login. Both `solure-maildesk.soluredigital.workers.dev` and `solure-maildesk-pixel.soluredigital.workers.dev` returned 404. The actual browser displayed the owner email one-time PIN login page.
+- A temporary “Deployment verification” record was inserted directly through the D1 CLI. HEAD recorded no event; two concurrent public GETs produced two events, `load_count=2` and one in-app notification with status `disabled` because email was off. No email was sent. This verifies a synthetic production capture through the public Worker and database, not private API creation or the owner interface.
+- A code was requested but owner login completion is pending. The private owner workflow, Outlook insertion and owner inbox delivery remain unverified. A Python default user agent received Cloudflare 403/error 1010; no edge policy was changed, and email-client/proxy compatibility still needs its actual test.
 
 ## 1. Review and source control
 
-- Put this standalone project in the owner’s private `solure-maildesk` repository. Review the diff and run `pnpm check` and `pnpm bundle:check`.
-- Confirm the actual repository owner and visibility through GitHub. Keep the existing website repository independent.
+- Keep this standalone project in the owner’s confirmed `git-mcmaster/Solure-Maildesk` repository. Review each release diff and require passing full-suite CI, type checking, client build and both Worker bundles.
+- Keep secrets, generated output and local activity out of Git. The repository is currently public with the owner’s knowledge; keep the existing website repository independent.
 - Keep production deployment manual at first. Cloudflare’s Git integration can build versions without promoting them by using `wrangler versions upload`; previews and production must use separate resources. An application code rollback does not roll back database changes.
 
 ## 2. Create isolated resources
 
-- Create a dedicated Cloudflare D1 database and record its returned ID in both Wrangler configurations. The all-zero ID is deliberately a placeholder.
-- Confirm the database is new/empty. Run the committed migrations locally first, then apply them to that database only after checking the selected account and database name.
+- Preserve the dedicated database ID `1e984554-9e0c-455c-91be-aefaae407324` in both production configurations. Its initial empty-state check and remote `0001`/`0002` migrations are complete; do not rerun setup against an unrelated database.
+- For any fresh environment, first confirm the selected account/database and empty state, then apply the reviewed migrations to that database only. The November 3 local D1 startup blocker did not establish a local migration pass; the initial schema has passing clean-Linux CI and successful production migration results.
 - For later migrations, export a backup, document compatibility and the actual restore procedure, and rehearse recovery in a disposable database. Do not assume reverting a Worker restores deleted rows.
 - Use separate database IDs for preview and production. Never let an unreviewed preview access the production database or live sender.
 
 ## 3. Protect the private Worker
 
-- Configure Cloudflare Access for the dashboard Worker’s **all traffic** scope, including production and alternate Worker URLs.
-- Allow only `elijah@soluredigitalworks.com`, using an exact Emails selector. An “any valid one-time PIN” rule is too broad.
-- Configure `ACCESS_TEAM_DOMAIN` with the actual Cloudflare Access team hostname and `ACCESS_AUD` with the application’s actual audience. These are identifiers, not values to guess.
+- Preserve hostname Access coverage for every dashboard path. Both alternate `workers.dev` and preview URLs are disabled. Before enabling any alternate URL, explicitly protect it as well; hostname coverage must not be treated as Worker-level all-traffic protection.
+- Preserve the configured exact Emails selector for `elijah@soluredigitalworks.com` and the enabled email one-time PIN method. An “any valid one-time PIN” rule is too broad.
+- Preserve `ACCESS_TEAM_DOMAIN=throbbing-morning-dbde.cloudflareaccess.com` and the actual returned application audience already in the production configuration. Neither is a guessed identifier.
 - Set the dashboard origin to the actual HTTPS dashboard hostname. Production `DEV_AUTH` must be absent, and email mode must remain non-sending until the sender test.
 - Both configs keep `workers.dev` and preview URLs disabled by default. Public image access and the existing MTA-STS Worker must remain outside the dashboard policy.
-- Prove unauthenticated requests cannot fetch private HTML, API data, CSV files or static assets. Prove another identity is denied. Verify the token’s issuer, signature, audience and expiry, not merely its decoded email.
+- Preserve the verified unauthenticated redirects on the sampled HTML, bootstrap API, CSV and hashed script paths. Complete owner login and test another identity’s denial; the path sample is not exhaustive. Continue verifying JWT issuer, signature, audience and expiry in application code, not merely a decoded email.
 
 ## 4. Attach the two hostnames
 
-- Attach `maildesk.soluredigitalworks.com` to the private dashboard Worker and `pixel.soluredigitalworks.com` to the public image Worker.
+- Preserve the attached `maildesk.soluredigitalworks.com` dashboard domain and `pixel.soluredigitalworks.com` public image domain.
 - Cloudflare-hosted HTTPS Worker custom domains use Cloudflare’s proxy. Mail-related Microsoft MX/DKIM/Autodiscover records retain their own existing DNS-only configuration.
 - Serve pixel GET and HEAD requests without an Access login, JavaScript challenge or bot CAPTCHA. Protect the endpoint through opaque tokens, validation and recording caps instead.
-- Confirm the image path bypasses cache rules and responds with the intended no-store headers. Recipient proxies can still cache; these headers do not defeat privacy features.
+- Cache-prevention headers passed the standard-user-agent public check. Confirm actual email clients and image proxies can retrieve a known image; the Python-default-user-agent edge denial is unresolved client-coverage evidence. Recipient proxies can still cache; these headers do not defeat privacy features.
 
 ## 5. Configure optional email alerts
 
-- Check whether the native Cloudflare Email Sending service is available in the owner’s account. Use a dedicated sending subdomain if supported by the actual onboarding flow, and inspect every proposed DNS record before accepting it.
+- Initial release can use the implemented in-app notification history. Native email alerts are not configured, and no owner inbox delivery has been verified.
+- This account’s current Email Sending onboarding UI requires Workers Paid. No upgrade was accepted; any paid service requires separate owner authorization. If sender setup is revisited, use a dedicated sending subdomain if supported by the actual onboarding flow and inspect every proposed DNS record before accepting it.
 - **Do not enable root Email Routing.** It is a different service that replaces MX and conflicts with the Microsoft mailbox.
 - Check that onboarding preserves existing root authentication policy and reporting endpoints. Add only the sender-authentication records that are actually required.
 - Add an `EMAIL` binding restricted to the verified owner destination. Configure `EMAIL_FROM` with an actually authenticated sender and `EMAIL_MODE=live` only for an approved sending test.
@@ -50,8 +67,8 @@ This file is a release plan, not evidence that any of these steps have happened.
 
 ## 7. Release, observe and recover
 
-- Approve the final version before deploying or attaching live domains.
-- Recheck login denial, public image access, persistence, settings and notifications from the actual hostnames.
+- Keep the reviewed production configuration and dated verification evidence in source control. The deployed versions, two attached domains and synthetic capture are recorded above; they do not complete owner workflow verification.
+- Complete owner login and recheck persistence, settings and notifications through the private interface/API. Repeat actual-hostname access and pixel checks after future releases.
 - Add account usage alerts and review spending-control availability before assuming a fixed cost ceiling. Ordinary usage is expected to be small; public request abuse can consume quota.
 - Monitor failed notification states and database usage. Avoid request-body logs and unnecessary retention of tracking URLs or private labels.
 - To stop recording, archive pixels or remove the image Worker route. Pausing stops alerts while preserving image activity. To stop all alerts, disable them in settings and inspect in-flight sends. Keep the dashboard behind Access during any recovery.
