@@ -44,12 +44,20 @@ export async function dispatchNotifications(env: Env, time = new Date()): Promis
 }
 
 export async function enforceRetention(env: Env, time = new Date()): Promise<void> {
-  const setting = await env.DB.prepare('SELECT retention_days FROM settings WHERE id=1').first<{ retention_days: number }>();
-  const cutoff = new Date(time.getTime() - (setting?.retention_days ?? 90) * 86_400_000).toISOString();
-  await env.DB.batch([
-    env.DB.prepare('DELETE FROM events WHERE id IN (SELECT id FROM events WHERE created_at<? LIMIT 1000)').bind(cutoff),
-    env.DB.prepare('DELETE FROM notifications WHERE id IN (SELECT id FROM notifications WHERE created_at<? LIMIT 1000)').bind(cutoff),
-  ]);
-  // Pixel-level counts and first/last timestamps are aggregate history retained
-  // until the owner explicitly clears history or deletes the pixel.
+  const keep = await env.DB.prepare('SELECT keep_unloaded_pixels FROM settings WHERE id=1').first<number>('keep_unloaded_pixels');
+  if (keep !== 0) return;
+  const cutoff = new Date(time.getTime() - 90 * 86_400_000).toISOString();
+  // One serialized write rechecks every safeguard. A recorded first load and
+  // its durable flag commit together, so cleanup cannot interleave between them.
+  // Loaded events/metadata/notifications have no automatic expiry.
+  await env.DB.prepare(`DELETE FROM pixels WHERE id IN (
+    SELECT p.id FROM pixels p
+    WHERE p.has_recorded_load=0 AND p.preserve_unloaded=0 AND p.created_at<?
+      AND EXISTS (SELECT 1 FROM settings WHERE id=1 AND keep_unloaded_pixels=0)
+      AND p.load_count=0 AND p.early_load_count=0 AND p.daily_load_count=0
+      AND p.first_loaded_at IS NULL AND p.last_loaded_at IS NULL AND p.first_alert_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM events e WHERE e.pixel_id=p.id)
+      AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.pixel_id=p.id)
+    ORDER BY p.created_at,p.id LIMIT 1000
+  )`).bind(cutoff).run();
 }

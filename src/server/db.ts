@@ -6,6 +6,7 @@ export function pixelFromRow(row: PixelRow, env: Env): Pixel {
   return { id: row.id, token: row.token, label: row.label, recipient: row.recipient, notes: row.notes, status: row.status,
     createdAt: row.created_at, updatedAt: row.updated_at, armedAt: row.armed_at, firstAlertAt: row.first_alert_at, firstLoadedAt: row.first_loaded_at,
     lastLoadedAt: row.last_loaded_at, loadCount: row.load_count, earlyLoadCount: row.early_load_count,
+    hasRecordedLoad: row.has_recorded_load === 1, preserveUnloaded: row.preserve_unloaded === 1,
     pixelUrl: `${env.PIXEL_ORIGIN.replace(/\/$/u, '')}/p/${row.token}.gif`, notificationStatus: row.notification_status || 'none' };
 }
 
@@ -35,9 +36,9 @@ export async function getPixel(env: Env, id: string): Promise<Pixel | null> {
 }
 
 export async function getSettings(env: Env): Promise<Settings> {
-  const row = await env.DB.prepare('SELECT * FROM settings WHERE id=1').first<{ email_enabled: number; retention_days: 30 | 90 | 180; repeat_alerts: number; capture_request_details: number }>();
+  const row = await env.DB.prepare('SELECT * FROM settings WHERE id=1').first<{ email_enabled: number; retention_days: 30 | 90 | 180; repeat_alerts: number; capture_request_details: number; keep_unloaded_pixels: number }>();
   if (!row) throw new Error('Database migration missing');
-  return { emailEnabled: row.email_enabled === 1, retentionDays: row.retention_days, repeatAlerts: row.repeat_alerts === 1, captureRequestDetails: row.capture_request_details === 1 };
+  return { emailEnabled: row.email_enabled === 1, retentionDays: row.retention_days, repeatAlerts: row.repeat_alerts === 1, captureRequestDetails: row.capture_request_details === 1, keepUnloadedPixels: row.keep_unloaded_pixels === 1 };
 }
 
 export async function listNotifications(env: Env): Promise<Notification[]> {

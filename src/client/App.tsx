@@ -565,6 +565,22 @@ export default function App() {
       );
     }
   }
+  async function preserveUnloadedPixel(preserveUnloaded: boolean) {
+    if (!selected) return;
+    const id = selected.id;
+    await action("preserve", async () => {
+      const pixel = await request<Pixel>(`/api/pixels/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ preserveUnloaded }),
+      });
+      if (selectedIdRef.current === id) setSelectedRecord(pixel);
+      await load();
+      await loadList();
+      setToast(preserveUnloaded
+        ? "This pixel will be kept even if it never loads."
+        : "This pixel now follows your never-loaded pixel preference.");
+    });
+  }
   async function markRead(ids?: string[]) {
     await action("read", async () => {
       await request("/api/notifications/read", {
@@ -1073,6 +1089,35 @@ export default function App() {
                       {busy === "save" ? "Saving…" : "Save details"}
                     </button>
                   </form>
+                  <div className="pixel-retention">
+                    <strong>Record retention</strong>
+                    {selected.hasRecordedLoad ? (
+                      <p>
+                        Kept permanently after its first recorded load, including
+                        activity and saved request details. You can still clear
+                        activity or delete this pixel yourself.
+                      </p>
+                    ) : (
+                      <>
+                        <label className="retention-choice">
+                          <input
+                            type="checkbox"
+                            checked={selected.preserveUnloaded}
+                            disabled={!!busy || offline}
+                            onChange={(event) => void preserveUnloadedPixel(event.target.checked)}
+                          />
+                          <span>Keep this pixel even if it never loads</span>
+                        </label>
+                        <p>
+                          {selected.preserveUnloaded
+                            ? "This record is protected from automatic cleanup."
+                            : data.settings.keepUnloadedPixels
+                              ? "Your preferences keep all never-loaded pixels. This checkbox also protects this pixel if you turn 90-day cleanup back on."
+                              : "If it never records a load, this pixel and its label and notes are deleted 90 days after creation. Any recorded load makes its history permanent."}
+                        </p>
+                      </>
+                    )}
+                  </div>
                   {selected.status !== "archived" && (
                     <button
                       className="button primary full-width arm-button"
@@ -1100,7 +1145,7 @@ export default function App() {
                       ? `Last enabled ${formatDate(selected.armedAt)}.`
                       : "Loads before you enable alerts stay in the activity history."}{" "}
                     {selected.notificationStatus === "none" && selected.firstAlertAt
-                      ? "A first-load notification was already recorded; its detailed history has been cleared or expired."
+                      ? "A first-load notification was already recorded; its detailed history was cleared or removed under an earlier retention policy."
                       : `Email: ${deliveryNames[selected.notificationStatus]}.`}
                   </p>
                   <div className="detail-divider" />
@@ -1343,8 +1388,11 @@ export default function App() {
             </p>
             <p>
               Turning collection off stops saving details for future loads.
-              Saved details follow your activity retention period, or you can
-              remove them by clearing the activity or deleting the message.
+              Once a pixel records a load, its history and saved details are kept
+              permanently unless you clear the activity or delete the pixel.
+              Pixels that never load are deleted 90 days after creation unless
+              you keep them individually or keep all never-loaded pixels in
+              preferences. A proxy or scanner request also counts as a load.
             </p>
             <h3>After sending</h3>
             <p>
@@ -1461,32 +1509,35 @@ export default function App() {
               <p id="request-details-privacy" className="request-privacy-note">
                 Proxies can replace reader information; this is request data,
                 not a person’s identity or GPS location. Turning this off stops
-                future collection. Saved details follow your{" "}
-                {settingsDraft.retentionDays}-day activity retention setting
-                unless you clear activity or delete the message.
+                future collection. Saved details are kept permanently after a
+                recorded load unless you clear activity or delete the pixel.
               </p>
-              <label className="setting-select">
-                Keep detailed activity for
-                <select
-                  value={settingsDraft.retentionDays}
-                  onChange={(event) =>
-                    setSettingsDraft({
-                      ...settingsDraft,
-                      retentionDays: Number(
-                        event.target.value,
-                      ) as Settings["retentionDays"],
-                    })
-                  }
-                >
-                  <option value={30}>30 days</option>
-                  <option value={90}>90 days</option>
-                  <option value={180}>180 days</option>
-                </select>
-              </label>
+              <div className="setting-row">
+                <div>
+                  <strong id="keep-unloaded-title">Keep all never-loaded pixels</strong>
+                  <p id="keep-unloaded-description">
+                    When off, never-loaded pixels are deleted 90 days after
+                    creation unless you keep a specific pixel. Turn on to keep
+                    all of them permanently.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  aria-labelledby="keep-unloaded-title"
+                  aria-describedby="keep-unloaded-description"
+                  checked={settingsDraft.keepUnloadedPixels}
+                  onChange={(event) => setSettingsDraft({
+                    ...settingsDraft,
+                    keepUnloadedPixels: event.target.checked,
+                  })}
+                />
+              </div>
               <p className="quiet-note">
-                Older event details are removed during scheduled cleanup.
-                Message labels and lifetime summary counts remain until you
-                delete or clear them.
+                Loaded pixels, activity, saved request details and notifications
+                are kept permanently, including when archived. Clearing activity
+                or deleting a pixel still removes that data. Turning this setting
+                off makes unprotected never-loaded pixels older than 90 days
+                eligible for the next cleanup.
               </p>
               {error && (
                 <p role="alert" className="field-error">

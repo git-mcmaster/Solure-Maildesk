@@ -1,5 +1,34 @@
 # Verification record
 
+## Conditional retention — November 4, 2026
+
+The owner requested and authorized publication of a replacement retention policy: keep any pixel with a recorded load and all its activity/request details permanently; remove only never-loaded pixels after 90 days, with preservation toggles. This supersedes the activity-age expiration documented in earlier releases below.
+
+Implemented behavior:
+
+- Loaded pixels, events, metadata and notifications are never removed automatically by age, including archived pixels. Manual clear/delete remains available and destructive.
+- Never-loaded pixels are eligible for automatic deletion after 90 days from creation. Each pixel can be protected with “Keep this pixel even if it never loads.” Preferences also offers “Keep all never-loaded pixels.” Both preservation flags default off, matching the requested 90-day baseline.
+- A durable `hasRecordedLoad` marker is backfilled from available historical load evidence and set atomically by a trigger on the first recorded event. Manual activity clearing does not reset it. Scanner/proxy loads count; missing historical evidence cannot be reconstructed.
+- The legacy `retentionDays` field remains accepted for older clients but no longer expires loaded activity. Partial updates preserve unrelated capture/preservation preferences.
+- Cleanup uses one atomic, bounded DELETE with a recheck of global/per-pixel protection and load evidence, plus indexed candidate and related-record lookups. No paid plan, dependencies, DNS or access changes are included.
+
+Local checks before publication:
+
+| Check | Result |
+| --- | --- |
+| `node node_modules/typescript/bin/tsc --noEmit` | Passed on installed Node 24.22.1 |
+| `node node_modules/vitest/vitest.mjs run tests/server/request-metadata.test.ts tests/server/maildesk.test.ts` | 50/50 passed in disposable Miniflare/D1, including migration backfill, 90-day boundary, both preservation toggles, historical loaded metadata/notifications, clear-history permanence, atomic first-load/protection races and bounded cleanup |
+| `node node_modules/vite/bin/vite.js build` | Passed |
+| `node node_modules/wrangler/bin/wrangler.js deploy --dry-run --config wrangler.dashboard.jsonc --outdir dist/dashboard-worker` and corresponding pixel config/output | Both bundles passed |
+| `git diff --check` | Passed |
+| Private backup upgrade rehearsal | Restored the current export into disposable SQLite and applied `0004`; preserved three pixels, seven events, two notifications, and existing capture settings. All existing pixels gained the recorded-load marker. No backup record/event/notification was older than 90 days |
+| Isolated local migration | `0004_permanent_loaded_history.sql` applied successfully |
+| Browser controls | Per-pixel preservation saved and survived reload. Global keep-all saved and survived reload, then was restored off. A controlled local GET changed an unloaded pixel to permanent retention. Loaded records displayed the permanence explanation |
+| Responsive controls | Per-pixel keep controls and preferences inspected in exact 390/320-CSS-pixel frames; checked document widths matched their viewport widths. Browser-frame tests, not physical-device tests |
+
+A separate read-only review and disposable SQLite query-plan inspection confirmed indexed cleanup without temporary sorting and no additional material defect in the inspected retention implementation. Production migration/deployment is recorded below once verified. Existing inbox-alert and actual-Outlook limitations remain separate from retention behavior.
+
+
 ## Optional request details — November 4, 2026
 
 Implemented and verified locally. The owner approved publication, deployment, the additive migration and enabling collection, conditional on a cohesive per-pixel history. The new schema defaults collection off; enabling it records only future requests. Publication and production verification are recorded separately below when performed.

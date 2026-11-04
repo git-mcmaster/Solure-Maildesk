@@ -16,6 +16,8 @@ export interface Pixel {
   lastLoadedAt: string | null;
   loadCount: number;
   earlyLoadCount: number;
+  hasRecordedLoad: boolean;
+  preserveUnloaded: boolean;
   pixelUrl: string;
   notificationStatus: DeliveryStatus | 'none';
 }
@@ -68,9 +70,11 @@ export interface Notification {
 
 export interface Settings {
   emailEnabled: boolean;
+  /** Legacy compatibility value; automatic loaded-history expiry is disabled. */
   retentionDays: 30 | 90 | 180;
   repeatAlerts: boolean;
   captureRequestDetails: boolean;
+  keepUnloadedPixels: boolean;
 }
 
 export interface Bootstrap {
@@ -114,5 +118,7 @@ export interface PixelRow {
   last_loaded_at: string | null;
   load_count: number;
   early_load_count: number;
+  has_recorded_load: number;
+  preserve_unloaded: number;
   notification_status?: DeliveryStatus | null;
 }

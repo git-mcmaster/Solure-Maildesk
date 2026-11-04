@@ -133,17 +133,21 @@ async function api(request: Request, env: Env): Promise<Response> {
       if (method === 'DELETE') { await env.DB.prepare('DELETE FROM pixels WHERE id=?').bind(id).run(); return json({ deleted: true }); }
       if (method === 'PATCH') {
         const body = await readJson(request);
-        onlyFields(body, ['label', 'recipient', 'notes', 'status']);
+        onlyFields(body, ['label', 'recipient', 'notes', 'status', 'preserveUnloaded']);
+        if (body.preserveUnloaded !== undefined && typeof body.preserveUnloaded !== 'boolean') throw new HttpError(400, 'INVALID_FIELD', 'Pixel preservation must be on or off.');
         const status = body.status === undefined ? pixel.status : body.status as PixelStatus;
         if (!statuses.has(status)) throw new HttpError(400, 'INVALID_STATUS', 'Choose a valid pixel status.');
         const now = new Date().toISOString();
-        const edits = [env.DB.prepare('UPDATE pixels SET label=?,recipient=?,notes=?,status=?,armed_at=?,updated_at=? WHERE id=?')
+        const edits = [env.DB.prepare('UPDATE pixels SET label=?,recipient=?,notes=?,status=?,armed_at=?,preserve_unloaded=COALESCE(?,preserve_unloaded),updated_at=? WHERE id=?')
           .bind(body.label === undefined ? pixel.label : stringField(body.label, 'Label', 150) || 'Unlabeled pixel', body.recipient === undefined ? pixel.recipient : recipientField(body.recipient),
             body.notes === undefined ? pixel.notes : stringField(body.notes, 'Notes', 2000), status,
-            status === 'armed' && pixel.status !== 'armed' ? now : pixel.armedAt, now, id)];
+            status === 'armed' && pixel.status !== 'armed' ? now : pixel.armedAt,
+            body.preserveUnloaded === undefined ? null : Number(body.preserveUnloaded), now, id)];
         if (status !== 'armed') edits.push(env.DB.prepare("UPDATE notifications SET status='disabled' WHERE pixel_id=? AND status IN ('pending','failed')").bind(id));
         await env.DB.batch(edits);
-        return json(await getPixel(env, id));
+        const saved = await getPixel(env, id);
+        if (!saved) throw new HttpError(404, 'NOT_FOUND', 'This pixel could not be found.');
+        return json(saved);
       }
     }
     throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'This action is not supported.');
@@ -151,16 +155,17 @@ async function api(request: Request, env: Env): Promise<Response> {
   if (path === '/api/settings' && method === 'GET') return json(await getSettings(env));
   if (path === '/api/settings' && method === 'PATCH') {
     const body = await readJson(request);
-    onlyFields(body, ['emailEnabled', 'retentionDays', 'repeatAlerts', 'captureRequestDetails']);
+    onlyFields(body, ['emailEnabled', 'retentionDays', 'repeatAlerts', 'captureRequestDetails', 'keepUnloadedPixels']);
     if (body.emailEnabled !== undefined && typeof body.emailEnabled !== 'boolean') throw new HttpError(400, 'INVALID_FIELD', 'Email alerts must be on or off.');
     if (body.repeatAlerts !== undefined && typeof body.repeatAlerts !== 'boolean') throw new HttpError(400, 'INVALID_FIELD', 'Repeat alerts must be on or off.');
     if (body.captureRequestDetails !== undefined && typeof body.captureRequestDetails !== 'boolean') throw new HttpError(400, 'INVALID_FIELD', 'Request details must be on or off.');
+    if (body.keepUnloadedPixels !== undefined && typeof body.keepUnloadedPixels !== 'boolean') throw new HttpError(400, 'INVALID_FIELD', 'Unused pixel preservation must be on or off.');
     if (body.retentionDays !== undefined && ![30, 90, 180].includes(body.retentionDays as number)) throw new HttpError(400, 'INVALID_FIELD', 'Choose 30, 90 or 180 days of history.');
     if (body.emailEnabled === true && !notificationConfigured(env)) throw new HttpError(409, 'NOTIFICATION_NOT_CONFIGURED', 'Configure notification sending before enabling email alerts. Dashboard notifications already work.');
     // Omitted fields are preserved inside the write, so a concurrent retention
     // save cannot restore a stale capture=true after the owner disabled it.
-    await env.DB.prepare('UPDATE settings SET email_enabled=COALESCE(?,email_enabled),retention_days=COALESCE(?,retention_days),repeat_alerts=COALESCE(?,repeat_alerts),capture_request_details=COALESCE(?,capture_request_details) WHERE id=1')
-      .bind(body.emailEnabled === undefined ? null : Number(body.emailEnabled), body.retentionDays ?? null, body.repeatAlerts === undefined ? null : Number(body.repeatAlerts), body.captureRequestDetails === undefined ? null : Number(body.captureRequestDetails)).run();
+    await env.DB.prepare('UPDATE settings SET email_enabled=COALESCE(?,email_enabled),retention_days=COALESCE(?,retention_days),repeat_alerts=COALESCE(?,repeat_alerts),capture_request_details=COALESCE(?,capture_request_details),keep_unloaded_pixels=COALESCE(?,keep_unloaded_pixels) WHERE id=1')
+      .bind(body.emailEnabled === undefined ? null : Number(body.emailEnabled), body.retentionDays ?? null, body.repeatAlerts === undefined ? null : Number(body.repeatAlerts), body.captureRequestDetails === undefined ? null : Number(body.captureRequestDetails), body.keepUnloadedPixels === undefined ? null : Number(body.keepUnloadedPixels)).run();
     return json(await getSettings(env));
   }
   if (path === '/api/notifications' && method === 'GET') return json(await listNotifications(env));

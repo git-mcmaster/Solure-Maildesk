@@ -11,20 +11,23 @@ import type { Bootstrap, Env, LoadEvent, LoadEventPage, Pixel, PixelPage, Settin
 let mf: Miniflare;
 let env: Env;
 const origin = 'http://127.0.0.1:8787';
+const migrations = new URL('../../migrations/', import.meta.url);
+
+async function applyMigration(DB: D1Database, file: string) {
+  const migration = await readFile(new URL(file, migrations), 'utf8');
+  // Keep a complete trigger intact; plain additive migrations have no trigger.
+  const sql = migration.replace(/--[^\n]*/gu, '');
+  const triggerAt = sql.indexOf('CREATE TRIGGER');
+  const setup = (triggerAt < 0 ? sql : sql.slice(0, triggerAt)).split(';').map((part) => part.trim()).filter(Boolean);
+  await DB.batch(setup.map((statement) => DB.prepare(statement)));
+  if (triggerAt >= 0) await DB.prepare(sql.slice(triggerAt)).run();
+}
 
 beforeAll(async () => {
-  mf = new Miniflare({ modules: true, script: 'export default { fetch() { return new Response("test"); } };', compatibilityDate: '2026-07-30', d1Databases: { DB: 'maildesk-unit-tests' } });
+  mf = new Miniflare({ modules: true, script: 'export default { fetch() { return new Response("test"); } };', compatibilityDate: '2026-07-30', d1Databases: { DB: 'maildesk-unit-tests', LEGACY_DB: 'maildesk-migration-tests' } });
   const DB = await mf.getD1Database('DB') as unknown as D1Database;
-  const migrations = new URL('../../migrations/', import.meta.url);
   for (const file of (await readdir(migrations)).filter((name) => name.endsWith('.sql')).sort()) {
-    const migration = await readFile(new URL(file, migrations), 'utf8');
-    // D1.exec is line-oriented and cannot apply a multi-line trigger. Keep that
-    // complete CREATE TRIGGER statement intact, just as Wrangler migrations do.
-    const sql = migration.replace(/--[^\n]*/gu, '');
-    const triggerAt = sql.indexOf('CREATE TRIGGER');
-    const setup = (triggerAt < 0 ? sql : sql.slice(0, triggerAt)).split(';').map((part) => part.trim()).filter(Boolean);
-    await DB.batch(setup.map((statement) => DB.prepare(statement)));
-    if (triggerAt >= 0) await DB.prepare(sql.slice(triggerAt)).run();
+    await applyMigration(DB, file);
   }
   env = { DB, OWNER_EMAIL: 'elijah@soluredigitalworks.com', DASHBOARD_ORIGIN: origin, PIXEL_ORIGIN: 'http://127.0.0.1:8788', DEV_AUTH: 'true', EMAIL_MODE: 'dry-run' };
 }, 30_000);
@@ -32,7 +35,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM notifications'), env.DB.prepare('DELETE FROM events'), env.DB.prepare('DELETE FROM pixels'),
-    env.DB.prepare('UPDATE settings SET email_enabled=0,repeat_alerts=0,capture_request_details=0,retention_days=90,event_day=NULL,event_count=0 WHERE id=1'),
+    env.DB.prepare('UPDATE settings SET email_enabled=0,repeat_alerts=0,capture_request_details=0,keep_unloaded_pixels=0,retention_days=90,event_day=NULL,event_count=0 WHERE id=1'),
   ]);
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -378,7 +381,7 @@ describe('optional private request details', () => {
     expect(await env.DB.prepare('SELECT request_metadata FROM events WHERE pixel_id=?').bind(pixel.id).first('request_metadata')).toBeNull();
   });
 
-  it('does not restore stale capture when an unrelated settings save completes after capture is disabled', async () => {
+  it('does not restore stale capture or cleanup settings after concurrent preservation changes', async () => {
     await api('/api/settings', 'PATCH', { captureRequestDetails: true });
     let entered!: () => void;
     let release!: () => void;
@@ -393,10 +396,10 @@ describe('optional private request details', () => {
     } } as unknown as D1Database;
     const retentionSave = api<Settings>('/api/settings', 'PATCH', { retentionDays: 30 }, { DB });
     await waiting;
-    try { expect((await api<Settings>('/api/settings', 'PATCH', { captureRequestDetails: false })).data.captureRequestDetails).toBe(false); }
+    try { expect((await api<Settings>('/api/settings', 'PATCH', { captureRequestDetails: false, keepUnloadedPixels: true })).data.captureRequestDetails).toBe(false); }
     finally { release(); }
     expect((await retentionSave).response.status).toBe(200);
-    expect((await api<Settings>('/api/settings')).data).toMatchObject({ captureRequestDetails: false, retentionDays: 30 });
+    expect((await api<Settings>('/api/settings')).data).toMatchObject({ captureRequestDetails: false, retentionDays: 30, keepUnloadedPixels: true });
   });
 
   it('serves old events with null details and treats corrupted stored metadata as unavailable', async () => {
@@ -408,13 +411,13 @@ describe('optional private request details', () => {
     expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.metadata).toBeNull();
   });
 
-  it('removes metadata with event retention, clear-history and pixel deletion', async () => {
+  it('retains old metadata automatically and removes it only through explicit history clearing or deletion', async () => {
     const pixel = await create();
     await api('/api/settings', 'PATCH', { captureRequestDetails: true });
     await fetchPixel(detailedRequest(pixel), env);
     await env.DB.prepare("UPDATE events SET created_at='2025-01-01T00:00:00.000Z'").run();
     await enforceRetention(env);
-    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(0);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(1);
     await fetchPixel(detailedRequest(pixel), env);
     expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.metadata?.requestIp).toBe('198.51.100.23');
     await api(`/api/pixels/${pixel.id}/events`, 'DELETE');
@@ -422,6 +425,186 @@ describe('optional private request details', () => {
     await fetchPixel(detailedRequest(pixel), env);
     await api(`/api/pixels/${pixel.id}`, 'DELETE');
     expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(0);
+  });
+});
+
+describe('permanent loaded history and unused pixel cleanup', () => {
+  const cleanupAt = new Date('2030-01-01T00:00:00.000Z');
+  const cutoff = cleanupAt.getTime() - 90 * 86_400_000;
+  async function aged(label: string, offset = -1): Promise<Pixel> {
+    const pixel = await create(label);
+    await env.DB.prepare('UPDATE pixels SET created_at=? WHERE id=?').bind(new Date(cutoff + offset).toISOString(), pixel.id).run();
+    return pixel;
+  }
+
+  it('backfills every legacy load signal without deleting history, and remembers subsequent inserts', async () => {
+    const DB = await mf.getD1Database('LEGACY_DB') as unknown as D1Database;
+    for (const file of ['0001_initial.sql', '0002_daily_counters.sql', '0003_request_details.sql']) await applyMigration(DB, file);
+    const scalarEvidence: [string, number | string][] = [
+      ['load_count', 1], ['early_load_count', 1], ['daily_load_count', 1],
+      ['first_loaded_at', '2025-01-01T00:00:00.000Z'], ['last_loaded_at', '2025-01-01T00:00:00.000Z'], ['first_alert_at', '2025-01-01T00:00:00.000Z'],
+    ];
+    const ids = ['unused', ...scalarEvidence.map(([column]) => column), 'event-only', 'notification-only'];
+    await DB.batch(ids.map((id, index) => DB.prepare("INSERT INTO pixels(id,token,label,created_at,updated_at) VALUES(?,?,?,'2025-01-01T00:00:00.000Z','2025-01-01T00:00:00.000Z')").bind(id, index.toString(16).padStart(32, '0'), id)));
+    await DB.batch(scalarEvidence.map(([column, value]) => DB.prepare(`UPDATE pixels SET ${column}=? WHERE id=?`).bind(value, column)));
+    await DB.prepare("INSERT INTO events(id,pixel_id,created_at,phase) VALUES('legacy-event','event-only','2025-01-01T00:00:00.000Z','before_arming')").run();
+    await DB.prepare("UPDATE pixels SET load_count=0,early_load_count=0,daily_load_count=0,first_loaded_at=NULL,last_loaded_at=NULL,first_alert_at=NULL WHERE id='event-only'").run();
+    await DB.prepare("INSERT INTO notifications(id,pixel_id,dedupe_key,created_at,status,next_attempt_at) VALUES('legacy-notification','notification-only','legacy-key','2025-01-01T00:00:00.000Z','disabled','2025-01-01T00:00:00.000Z')").run();
+    await applyMigration(DB, '0004_permanent_loaded_history.sql');
+    const rows = (await DB.prepare('SELECT id,has_recorded_load,preserve_unloaded FROM pixels').all<{ id: string; has_recorded_load: number; preserve_unloaded: number }>()).results;
+    expect(rows).toHaveLength(ids.length);
+    for (const row of rows) expect(row).toMatchObject({ has_recorded_load: row.id === 'unused' ? 0 : 1, preserve_unloaded: 0 });
+    expect(await DB.prepare('SELECT keep_unloaded_pixels FROM settings WHERE id=1').first('keep_unloaded_pixels')).toBe(0);
+    expect(await DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(1);
+    expect(await DB.prepare('SELECT COUNT(*) AS count FROM notifications').first('count')).toBe(1);
+    await DB.prepare("INSERT INTO events(id,pixel_id,created_at,phase) VALUES('new-event','unused','2026-11-04T00:00:00.000Z','before_arming')").run();
+    await DB.prepare("DELETE FROM events WHERE pixel_id='unused'").run();
+    expect(await DB.prepare("SELECT has_recorded_load FROM pixels WHERE id='unused'").first('has_recorded_load')).toBe(1);
+  });
+
+  it('deletes only genuinely unused pixels strictly older than 90 days, including archived ones', async () => {
+    const old = await aged('Older than cutoff');
+    const exact = await aged('At cutoff', 0);
+    const newer = await aged('Newer than cutoff', 1);
+    const archived = await aged('Archived and unused');
+    await api(`/api/pixels/${archived.id}`, 'PATCH', { status: 'archived' });
+    await enforceRetention(env, cleanupAt);
+    for (const pixel of [old, archived]) expect((await api(`/api/pixels/${pixel.id}`)).response.status).toBe(404);
+    for (const pixel of [exact, newer]) expect((await api(`/api/pixels/${pixel.id}`)).response.status).toBe(200);
+    await enforceRetention(env, new Date(cleanupAt.getTime() + 1));
+    expect((await api(`/api/pixels/${exact.id}`)).response.status).toBe(404);
+    expect((await api(`/api/pixels/${newer.id}`)).response.status).toBe(200);
+  });
+
+  it('honors global and per-pixel preservation, validates booleans and allows explicit owner deletion', async () => {
+    const preserved = await aged('Preserved unused');
+    const plain = await aged('Ordinary unused');
+    expect((await api<Settings>('/api/settings')).data.keepUnloadedPixels).toBe(false);
+    expect(preserved).toMatchObject({ preserveUnloaded: false, hasRecordedLoad: false });
+    for (const value of [1, 'true', null]) {
+      expect((await api('/api/settings', 'PATCH', { keepUnloadedPixels: value })).response.status).toBe(400);
+      expect((await api(`/api/pixels/${preserved.id}`, 'PATCH', { preserveUnloaded: value })).response.status).toBe(400);
+    }
+    expect((await api<Pixel>(`/api/pixels/${preserved.id}`, 'PATCH', { preserveUnloaded: true })).data.preserveUnloaded).toBe(true);
+    await api('/api/settings', 'PATCH', { keepUnloadedPixels: true });
+    await enforceRetention(env, cleanupAt);
+    for (const pixel of [preserved, plain]) expect((await api(`/api/pixels/${pixel.id}`)).response.status).toBe(200);
+    await api('/api/settings', 'PATCH', { keepUnloadedPixels: false });
+    await enforceRetention(env, cleanupAt);
+    expect((await api(`/api/pixels/${plain.id}`)).response.status).toBe(404);
+    expect((await api(`/api/pixels/${preserved.id}`)).response.status).toBe(200);
+    await api(`/api/pixels/${preserved.id}`, 'PATCH', { preserveUnloaded: false });
+    await enforceRetention(env, cleanupAt);
+    expect((await api(`/api/pixels/${preserved.id}`)).response.status).toBe(404);
+    const manual = await aged('Manual deletion remains available');
+    await api(`/api/pixels/${manual.id}`, 'PATCH', { preserveUnloaded: true });
+    await api('/api/settings', 'PATCH', { keepUnloadedPixels: true });
+    expect((await api(`/api/pixels/${manual.id}`, 'DELETE')).response.status).toBe(200);
+  });
+
+  it('preserves a newer per-pixel override when an unrelated label save completes later', async () => {
+    const pixel = await aged('Before label save');
+    let entered!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const DB = { prepare: (sql: string) => env.DB.prepare(sql), async batch(statements: D1PreparedStatement[]) {
+      entered(); await gate; return env.DB.batch(statements);
+    } } as unknown as D1Database;
+    const labelSave = api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { label: 'Saved label' }, { DB });
+    await waiting;
+    try { await api(`/api/pixels/${pixel.id}`, 'PATCH', { preserveUnloaded: true }); }
+    finally { release(); }
+    expect((await labelSave).data).toMatchObject({ label: 'Saved label', preserveUnloaded: true });
+    await enforceRetention(env, cleanupAt);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data.preserveUnloaded).toBe(true);
+  });
+
+  it('retains loaded archived history, metadata and notifications regardless of legacy retention values', async () => {
+    const pixel = await aged('Loaded archived forever');
+    await api('/api/settings', 'PATCH', { captureRequestDetails: true });
+    await arm(pixel);
+    await fetchPixel(detailedRequest(pixel), env);
+    await api(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'archived' });
+    await env.DB.prepare("UPDATE events SET created_at='2025-01-01T00:00:00.000Z'").run();
+    await env.DB.prepare("UPDATE notifications SET created_at='2025-01-01T00:00:00.000Z',status='failed',attempts=5").run();
+    for (const retentionDays of [30, 90, 180]) {
+      await api('/api/settings', 'PATCH', { retentionDays });
+      await enforceRetention(env, cleanupAt);
+    }
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data).toMatchObject({ status: 'archived', hasRecordedLoad: true, loadCount: 1 });
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.metadata?.requestIp).toBe('198.51.100.23');
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications).toHaveLength(1);
+    await api(`/api/pixels/${pixel.id}`, 'DELETE');
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(0);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM notifications').first('count')).toBe(0);
+  });
+
+  it('never makes a once-loaded pixel eligible after the owner clears all visible history', async () => {
+    const pixel = await aged('Cleared but once loaded');
+    await load(pixel);
+    await api(`/api/pixels/${pixel.id}/events`, 'DELETE');
+    await env.DB.prepare('UPDATE pixels SET daily_load_count=0 WHERE id=?').bind(pixel.id).run();
+    await enforceRetention(env, cleanupAt);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data).toMatchObject({ hasRecordedLoad: true, loadCount: 0, earlyLoadCount: 0, firstLoadedAt: null, lastLoadedAt: null });
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data).toEqual([]);
+  });
+
+  it('protects any remaining load evidence even when the durable flag is absent', async () => {
+    const columns = ['load_count', 'early_load_count', 'daily_load_count', 'first_loaded_at', 'last_loaded_at', 'first_alert_at'];
+    const pixels: Pixel[] = [];
+    for (const column of columns) {
+      const pixel = await aged(column);
+      pixels.push(pixel);
+      await env.DB.prepare(`UPDATE pixels SET ${column}=? WHERE id=?`).bind(column.endsWith('_count') ? 1 : '2025-01-01T00:00:00.000Z', pixel.id).run();
+    }
+    const eventOnly = await aged('Event only');
+    pixels.push(eventOnly);
+    await load(eventOnly);
+    await env.DB.prepare('UPDATE pixels SET has_recorded_load=0,load_count=0,early_load_count=0,daily_load_count=0,first_loaded_at=NULL,last_loaded_at=NULL,first_alert_at=NULL WHERE id=?').bind(eventOnly.id).run();
+    const notificationOnly = await aged('Notification only');
+    pixels.push(notificationOnly);
+    await env.DB.prepare("INSERT INTO notifications(id,pixel_id,dedupe_key,created_at,status,next_attempt_at) VALUES(?,?,?,'2025-01-01T00:00:00.000Z','disabled','2025-01-01T00:00:00.000Z')").bind(crypto.randomUUID(), notificationOnly.id, `guard:${notificationOnly.id}`).run();
+    await enforceRetention(env, cleanupAt);
+    for (const pixel of pixels) expect((await api(`/api/pixels/${pixel.id}`)).response.status).toBe(200);
+  });
+
+  it('short-circuits global preservation and atomically rechecks preservation changed before deletion', async () => {
+    const prepare = vi.fn(() => ({ first: async () => 1 }));
+    await enforceRetention({ ...env, DB: { prepare } as unknown as D1Database }, cleanupAt);
+    expect(prepare).toHaveBeenCalledTimes(1);
+    const pixel = await aged('Preserved during cleanup');
+    const DB = { prepare(sql: string) {
+      if (sql === 'SELECT keep_unloaded_pixels FROM settings WHERE id=1') return { async first() {
+        await env.DB.prepare('UPDATE settings SET keep_unloaded_pixels=1 WHERE id=1').run();
+        return 0;
+      } } as unknown as D1PreparedStatement;
+      return env.DB.prepare(sql);
+    } } as unknown as D1Database;
+    await enforceRetention({ ...env, DB }, cleanupAt);
+    expect((await api(`/api/pixels/${pixel.id}`)).response.status).toBe(200);
+  });
+
+  it('serializes first-load capture against cleanup without deleting a committed load or resurrecting a deleted pixel', async () => {
+    for (let index = 0; index < 12; index++) {
+      const pixel = await aged(`First-load race ${index}`);
+      const [image] = await Promise.all([load(pixel), enforceRetention(env, cleanupAt)]);
+      expect(image.status).toBe(200);
+      const row = await env.DB.prepare('SELECT has_recorded_load,load_count FROM pixels WHERE id=?').bind(pixel.id).first<{ has_recorded_load: number; load_count: number }>();
+      const count = await env.DB.prepare('SELECT COUNT(*) AS count FROM events WHERE pixel_id=?').bind(pixel.id).first('count');
+      if (row) { expect(row).toEqual({ has_recorded_load: 1, load_count: 1 }); expect(count).toBe(1); }
+      else expect(count).toBe(0);
+    }
+  });
+
+  it('bounds cleanup batches without automatically deleting preserved or loaded pixels', async () => {
+    const old = new Date(cutoff - 1).toISOString();
+    const statements = Array.from({ length: 1005 }, (_, index) => env.DB.prepare('INSERT INTO pixels(id,token,label,created_at,updated_at) VALUES(?,?,?,?,?)').bind(crypto.randomUUID(), index.toString(16).padStart(32, '0'), `Unused ${index}`, old, old));
+    await env.DB.batch(statements);
+    await enforceRetention(env, cleanupAt);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM pixels').first('count')).toBe(5);
+    await enforceRetention(env, cleanupAt);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM pixels').first('count')).toBe(0);
   });
 });
 
@@ -493,15 +676,16 @@ describe('notification outbox and retention', () => {
     expect((await api<Bootstrap>('/api/bootstrap')).data.notifications).toHaveLength(2);
   });
 
-  it('retains first-alert suppression after event history expires', async () => {
+  it('retains loaded history and terminal notifications indefinitely without reissuing a first alert', async () => {
     const pixel = await create();
     await arm(pixel);
     await load(pixel);
     await env.DB.prepare("UPDATE notifications SET created_at='2025-01-01T00:00:00.000Z',status='failed',attempts=5").run();
     await env.DB.prepare("UPDATE events SET created_at='2025-01-01T00:00:00.000Z'").run();
-    await enforceRetention(env);
+    await enforceRetention(env, new Date('2030-01-01T00:00:00.000Z'));
     await load(pixel);
-    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications).toHaveLength(0);
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications).toHaveLength(1);
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data).toHaveLength(2);
     const retained = (await api<Pixel>(`/api/pixels/${pixel.id}`)).data;
     expect(retained.loadCount).toBe(2);
     expect(retained.firstAlertAt).not.toBeNull();
