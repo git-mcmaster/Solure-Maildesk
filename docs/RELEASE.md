@@ -2,6 +2,29 @@
 
 This runbook separates confirmed setup from remaining release checks. The owner authorized implementation and deployment; completion still requires the evidence below. Keep the current Microsoft MX, SPF, DKIM, DMARC and public MTA-STS service intact.
 
+## 89-day reports — November 4, 2026, local implementation
+
+The owner requested one automatically generated report for every pixel at 89 days from creation, sent to `elijah@soluredigitalworks.com`. This update is implemented locally and passed 62 tests and TypeScript; it is **not yet published, migrated remotely or deployed**. Existing production release evidence below describes earlier code. Browser review and any sender provisioning are separate checks.
+
+The new minute scheduler queues up to 100 due snapshots, dispatches up to five reports, runs guarded unused-pixel cleanup, then dispatches up to five optional image-load alerts. A fully busy regression measures 40 D1 calls. “89 days” means elapsed time from creation; minute scheduling, retries and backlogs can delay processing. Reports cover never-loaded, loaded, paused and archived pixels and are independent of the image-load email-alert preference. They have no per-pixel opt-out.
+
+Snapshots include label/optional recipient, creation/status, current counts, first/latest recorded request, before-arming count, the 90-day unused-pixel threshold and the private history link. They exclude private notes, request IPs, User-Agents and public pixel tokens. The immutable snapshot survives automatic unused-pixel deletion. Explicit pixel deletion removes its linked snapshot; an authenticated orphan-report DELETE removes a snapshot after its pixel has expired. Deletion does not recall an in-flight or accepted email. Counts are saved image requests, not verified human reads; cleared history is not reconstructed.
+
+Loaded pixels and history remain permanent unless explicitly cleared/deleted. The global and per-pixel never-loaded preservation controls remain available. Unprotected never-loaded pixels may be automatically deleted only when strictly older than 90 days **and** their report has status `sent`, with an independently checked delivery marker. Pending, failed, unconfigured and local dry-run reports defer deletion. `sent` means the configured provider accepted the message, not that it reached the inbox. Leases and one-snapshot uniqueness prevent routine concurrent duplicates; a crash after provider acceptance can still cause a retry duplicate. Five automatic attempts are bounded with backoff; the owner can retry a failed report from private history.
+
+### Migration and recovery gate
+
+- Review and publish the exact source only after local checks and full-suite CI; no commit or publication is implied by this entry. Recheck both bundles and the owner report interface before deployment.
+- Export the confirmed Maildesk production database to a private file outside Git. Restore that export into disposable SQLite/D1 and rehearse `0005_pixel_reports.sql`, verifying original pixels, events, metadata, notifications and preservation settings remain unchanged. The local regression has exercised a populated `0004` fixture upgrade; a current production-export rehearsal remains required.
+- `0005` adds nullable queue/accepted markers, the durable snapshot/outbox table and due, delivery, cleanup and foreign-key indexes. Existing pixels are not deleted by the migration. Older due pixels will be queued after the new scheduler starts; no sender means they remain pending and cannot pass new cleanup.
+- Before migration, establish whether the currently deployed older scheduler could delete an already-overdue unused pixel during the rollout. If any such rows exist, suspend that old cron before applying the migration and deploying the new guarded scheduler. Do not assume additive schema compatibility preserves the new behavior.
+- Apply only to the confirmed dedicated Maildesk database, then deploy the reviewed dashboard Worker promptly and verify the new scheduler order and report access controls. The public image code and Microsoft mail DNS do not require changes for report generation.
+- **Do not roll back to code predating this report guard.** Earlier permanent-history code can delete unused pixels after 90 days without a sent report; still older code can age-delete loaded activity. Recover with a corrected build that retains both permanent-history and accepted-report cleanup rules. A database restore replaces newer data and requires explicit approval; it does not recall accepted emails. Additive schema changes alone are not a data-preserving reverse migration.
+
+### Sending remains unconfigured
+
+The Cloudflare destination has now been verified by the owner. The production `EMAIL` binding and sender remain unconfigured, and the Email Sending UI remains gated by Workers Paid. Apex Email Routing onboarding was canceled because it proposed replacing Microsoft MX records; no production mail DNS changes or paid upgrade were made. An API/subdomain-only free route is being investigated, but no functioning sender or free sending entitlement is established. Do not describe queued reports as delivered. Keep Microsoft’s existing MX/SPF/DKIM/DMARC and the public MTA-STS service intact. Actual owner inbox delivery remains a release gate.
+
 ## Confirmed setup — November 3, 2026
 
 - Source is published in the owner’s public [git-mcmaster/Solure-Maildesk repository](https://github.com/git-mcmaster/Solure-Maildesk). The owner deferred a visibility change; public visibility is not a release blocker.
@@ -99,8 +122,8 @@ The owner requested request IP, location and client/device information, then exp
 - Repeat owner sign-in, persistence, settings, notifications and actual-hostname pixel checks after future releases. Verify scheduled retention across its time boundary; the observed 90-day setting alone does not prove it ran.
 - Add account usage alerts and review spending-control availability before assuming a fixed cost ceiling. Ordinary usage is expected to be small; public request abuse can consume quota.
 - Monitor failed notification states and database usage. Avoid request-body logs and unnecessary retention of tracking URLs or private labels.
-- To stop recording, archive pixels or remove the image Worker route. Pausing stops alerts while preserving image activity. To stop all alerts, disable them in settings and inspect in-flight sends. Keep the dashboard behind Access during any recovery.
-- To restore the app, deploy a previously tested code version compatible with the current schema. Restore a database backup only when the recovery plan calls for it and with explicit approval of any data replacement.
+- To stop recording, archive pixels or remove the image Worker route. Pausing stops image-load alerts while preserving image activity. The optional image-load alert preference does not disable mandatory 89-day reports; sender changes and in-flight sends require separate operational review. Keep the dashboard behind Access during any recovery.
+- To restore the app, deploy a tested corrected version that preserves the current permanent-history and accepted-report cleanup rules, as well as schema compatibility. Restore a database backup only when the recovery plan calls for it and with explicit approval of any data replacement.
 
 ## Reference documentation
 

@@ -68,6 +68,31 @@ export interface Notification {
   lastError: string | null;
 }
 
+export type ReportStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'dry_run';
+
+export interface PixelReport {
+  id: string;
+  pixelId: string | null;
+  sourcePixelId: string;
+  label: string;
+  recipient: string;
+  pixelCreatedAt: string;
+  dueAt: string;
+  createdAt: string;
+  status: ReportStatus;
+  attempts: number;
+  lastError: string | null;
+  deliveredAt: string | null;
+  text: string;
+}
+
+export interface ReportPage {
+  items: PixelReport[];
+  total: number;
+  offset: number;
+  hasMore: boolean;
+}
+
 export interface Settings {
   emailEnabled: boolean;
   /** Legacy compatibility value; automatic loaded-history expiry is disabled. */

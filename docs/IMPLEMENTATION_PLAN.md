@@ -2,6 +2,22 @@
 
 Status: approved scope for local implementation; production deployment, DNS, live email sending and tenant changes remain separate release steps. November 2, 2026.
 
+## 89-day report extension — November 4, 2026
+
+The owner requested a report for every pixel at 89 elapsed days from creation, sent to `elijah@soluredigitalworks.com`. The extension is implemented locally and passed TypeScript plus all 62 backend/metadata tests. It is not yet published, migrated remotely or deployed. The dated original plan below remains context; this extension adds a mandatory report independent of the optional image-load email-alert preference.
+
+Use a dedicated D1 snapshot/outbox table with one unique source-pixel key, immutable text, leased claims and bounded retries. Migration `0005` adds nullable per-pixel queue/acceptance markers and indexes so already-queued pixels and overdue-but-undelivered cleanup candidates do not cause repeated full scans. The minute scheduler queues at most 100 due reports, dispatches at most five, performs accepted-report-gated cleanup, then dispatches at most five ordinary load alerts. The measured busy path uses 40 D1 calls. Scheduling/backlogs can delay processing beyond the exact due instant.
+
+Include every lifecycle state and both loaded/never-loaded pixels. Snapshot only the label, optional recipient, creation/status, current counts, first/latest timestamps, early-load count, unused-pixel threshold and private activity link. Omit notes, raw IPs, User-Agents and public tracking tokens. Clearly distinguish recorded image requests from human reads and current saved history from previously cleared activity. Owner-only report history provides pagination, per-pixel report lookup, delivery state and failed-report retry.
+
+Preserve permanent loaded history and both never-loaded keep controls. Automatic deletion of an unprotected never-loaded pixel now additionally requires provider acceptance of its report; absent configuration, failures and dry runs hold the pixel past 90 days. Automatic cleanup retains the report snapshot with a nullable pixel link. Explicit pixel deletion atomically removes the linked snapshot; a separate authenticated orphan-report DELETE allows removal after automatic cleanup. Deletion cannot recall accepted or in-flight email.
+
+Provider acceptance is not inbox proof. Unique snapshots and leases prevent normal concurrent duplication, but a crash after acceptance can cause a retry duplicate; no undocumented sending parameter is assumed. Five failed attempts require an owner retry after correcting configuration. Sending stays fixed to the owner and does not expose an arbitrary relay.
+
+Before release, export the production database privately and rehearse the additive `0005` migration on a disposable copy, then verify counts/settings. Suspend an older cron first if overdue unused pixels could be deleted during rollout. Deploy corrected code retaining permanent history **and** report-before-delete guards; older cleanup code is not an acceptable rollback. Restoring a database replaces newer data and needs separate approval. Snapshots accumulate against existing free quotas; no paid upgrade is authorized.
+
+The destination is verified, but production `EMAIL` binding and sender remain unconfigured. Email Sending’s UI is still Workers Paid-gated; apex routing onboarding was canceled without replacing Microsoft MX records. An API/subdomain-only free sending path is under investigation and has not established a working sender. Publication, CI, browser/live schedule checks and actual inbox delivery are separate evidence gates recorded in [VERIFICATION.md](VERIFICATION.md).
+
 ## Outcome and boundaries
 
 Build a private, responsive dashboard for Elijah to create one remotely hosted image per email, send through Outlook, label the image afterward, and review image-load activity. An image request is evidence of a request, not proof that a person read a message. Shared or forwarded messages cannot identify which person loaded their shared image. Image proxies, preloads, blocks and caches limit observations.

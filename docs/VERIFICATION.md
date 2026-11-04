@@ -1,5 +1,31 @@
 # Verification record
 
+## 89-day reports — November 4, 2026, local implementation
+
+Implemented locally following the owner’s request for a report for every pixel at 89 days from creation, emailed to the fixed Solure owner address. This section does **not** establish source publication, remote migration, deployment, real scheduler execution after 89 days, provider acceptance or inbox delivery. Earlier dated production evidence below remains historical.
+
+| Check | Observed result |
+| --- | --- |
+| `node node_modules/typescript/bin/tsc --noEmit` | Passed using installed Node 24.22.1 |
+| `node node_modules/vitest/vitest.mjs run tests/server/maildesk.test.ts tests/server/request-metadata.test.ts` | 62/62 passed in two files using disposable Miniflare/D1; no live provider or production storage accessed |
+| `git diff --check` | Passed after backend/report changes |
+| `node node_modules/vite/bin/vite.js build` | Passed after the final compact-navigation CSS fix |
+| Worker dry-run bundles | Both dashboard and public pixel bundles passed; no deployment performed by these commands |
+| Browser report workflow | Synthetic local reports displayed pending, failed and accepted states; expanded snapshots were readable, a private-history button selected the correct pixel, and retry reset a failed report to queued with zero attempts |
+| Narrow layouts | Expanded report dialogs inspected in 390/320-CSS-pixel frames. A 6-pixel navigation overflow at 320 was fixed; final document widths matched both viewports. These were browser-frame checks, not physical-phone tests |
+| Populated schema upgrade regression | Applied `0005` to a disposable populated `0004` fixture, preserved existing pixel/event records and preservation settings, then queued its due snapshot successfully |
+| Query-plan inspection | Disposable SQLite used `pixels_report_due` for due-date seeking, `pixels_reported_cleanup` for accepted-report cleanup candidates and indexed report/event/notification lookups, including the report foreign-key lookup; no temporary sort or full-report scan on these paths |
+| Combined scheduled-call budget | Busy-path regression generated reports and dispatched five reports plus five image-load alerts in 40 D1 calls, below the Free plan’s 50-query invocation limit |
+| Separate source review | Read-only review found and then confirmed resolution of the combined invocation-budget issue and missing orphan-snapshot deletion path; no additional material findings in the inspected changes |
+
+The cases exercise the exact 89-day boundary, all pixel lifecycle states, never-loaded reports, bounded generation, concurrent unique queueing and claims, immutable text, owner-only recipients, note/IP/User-Agent/token exclusion, optional-alert independence, local-only dry runs, missing sender, backoff/five-attempt limit/manual retry, lease recovery, send-before-cleanup ordering, retained snapshots after automatic deletion, explicit linked/orphan deletion and generation/deletion races. Owner authentication, same-origin retry requests, pagination and input validation are included. Earlier permanent-history, request-detail, capture and outbox tests remain in the same passing suite.
+
+Reports use the minute schedule, so they become due 89 elapsed days after creation and may be processed later because of cron timing, backlogs or retries. The new cleanup requires both age greater than 90 days and provider-accepted report state, independently rechecked alongside preservation and load evidence. Loaded history remains permanent. Unconfigured, failed or dry-run sends hold unused pixels; report delivery is independent of the optional image-load alert switch. Plain-text snapshots omit notes/raw request details and contain a private history link. Automatic deletion leaves the snapshot; explicit pixel deletion removes its linked snapshot, and a separate private DELETE handles orphaned snapshots.
+
+`sent` records provider acceptance, not inbox delivery. A provider can accept immediately before a process crash, so a later retry can duplicate an email; no undocumented provider idempotency feature was assumed. Email delivery already in flight cannot be recalled by deletion. No live email was sent by these checks.
+
+The owner has verified the Cloudflare destination. The production native sending binding/sender remains unconfigured; the Email Sending UI still requires Workers Paid. Apex Email Routing onboarding was canceled without changing Microsoft mail DNS. An API/subdomain-only free path remains under investigation, not a verified sender. Current-source CI, current production-export migration rehearsal, publication, deployment, live report UI/scheduler checks and actual owner inbox delivery remain separate gates. Follow the migration/rollback warning in [RELEASE.md](RELEASE.md): older cleanup code does not preserve the new report-before-delete requirement.
+
 ## Conditional retention — November 4, 2026
 
 The owner requested and authorized publication of a replacement retention policy: keep any pixel with a recorded load and all its activity/request details permanently; remove only never-loaded pixels after 90 days, with preservation toggles. This supersedes the activity-age expiration documented in earlier releases below.

@@ -12,7 +12,9 @@ import type {
   LoadEventPage,
   Notification,
   Pixel,
+  PixelReport,
   PixelStatus,
+  ReportPage,
   RequestMetadata,
   Settings,
 } from "../server/types";
@@ -34,6 +36,7 @@ type IconName =
   | "archive"
   | "trash"
   | "mail"
+  | "report"
   | "refresh";
 type PixelPage = { items: Pixel[]; total: number; hasMore: boolean };
 const paths: Record<IconName, string> = {
@@ -54,6 +57,7 @@ const paths: Record<IconName, string> = {
   archive: "M3 3h18v5H3z M5 8v13h14V8 M9 12h6",
   trash: "M3 6h18 M8 6V3h8v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7",
   mail: "M3 5h18v14H3z M3 5l9 8 9-8",
+  report: "M6 3h9l4 4v14H6z M14 3v5h5 M9 12h7 M9 16h7",
   refresh: "M20 8A8 8 0 1 0 20 16 M20 3v5h-5",
 };
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -129,6 +133,16 @@ const deliveryNames: Record<string, string> = {
   dry_run: "Local test only",
   disabled: "Email alerts off",
 };
+const reportStatusNames: Record<PixelReport["status"], string> = {
+  pending: "Queued for email",
+  sending: "Sending",
+  sent: "Accepted by email service",
+  failed: "Delivery needs attention",
+  dry_run: "Local test only",
+};
+function reportDueAt(createdAt: string): string {
+  return new Date(new Date(createdAt).getTime() + 89 * 86_400_000).toISOString();
+}
 function formatDate(value: string | null, exact = false): string {
   if (!value) return "No loads recorded";
   const d = new Date(value);
@@ -200,6 +214,68 @@ function RequestDetails({ metadata }: { metadata: RequestMetadata | null }) {
           for earlier loads.
         </p>
       )}
+    </details>
+  );
+}
+
+function ReportCard({
+  report, expanded = false, busy, offline, onRetry, onView, onDelete,
+}: {
+  report: PixelReport;
+  expanded?: boolean;
+  busy: string;
+  offline: boolean;
+  onRetry: (id: string) => void;
+  onView: (pixelId: string) => void;
+  onDelete: (report: PixelReport) => void;
+}) {
+  return (
+    <details className="report-card" open={expanded ? true : undefined}>
+      <summary>
+        <span className="report-title">
+          <strong>{report.label || "Untitled message"}</strong>
+          <span>{report.recipient || "No recipient label"}</span>
+        </span>
+        <span className="report-status" data-status={report.status}>
+          {reportStatusNames[report.status]}
+        </span>
+      </summary>
+      <div className="report-card-body">
+        <dl className="report-facts">
+          <div><dt>Pixel created</dt><dd><time dateTime={report.pixelCreatedAt}>{formatDate(report.pixelCreatedAt, true)}</time></dd></div>
+          <div><dt>Report due after 89 days</dt><dd><time dateTime={report.dueAt}>{formatDate(report.dueAt, true)}</time></dd></div>
+          <div><dt>Snapshot recorded</dt><dd><time dateTime={report.createdAt}>{formatDate(report.createdAt, true)}</time></dd></div>
+          <div><dt>Email attempts</dt><dd>{report.attempts}</dd></div>
+          {report.deliveredAt && (report.status === "sent" || report.status === "dry_run") && (
+            <div>
+              <dt>{report.status === "sent" ? "Email service accepted" : "Local test recorded"}</dt>
+              <dd><time dateTime={report.deliveredAt}>{formatDate(report.deliveredAt, true)}</time></dd>
+            </div>
+          )}
+        </dl>
+        {report.lastError && <p className="field-error">{report.lastError}</p>}
+        {report.status === "sent" && <p className="quiet-note">Email-service acceptance does not confirm inbox delivery.</p>}
+        {report.status === "dry_run" && <p className="quiet-note">This report was tested locally. No email was sent.</p>}
+        <h3>Report snapshot</h3>
+        <pre className="report-snapshot">{report.text}</pre>
+        <div className="report-card-actions">
+          {report.pixelId ? (
+            <button className="text-button" disabled={!!busy || offline} onClick={() => onView(report.pixelId!)}>
+              View private load history <Icon name="arrow" size={14} />
+            </button>
+          ) : <p className="quiet-note">The pixel is no longer available. This report snapshot is retained.</p>}
+          {report.status === "failed" && (
+            <button className="button secondary" disabled={!!busy || offline} onClick={() => onRetry(report.id)}>
+              <Icon name="refresh" size={15} />{busy === `report-${report.id}` ? "Retrying…" : "Retry report email"}
+            </button>
+          )}
+          {report.pixelId === null && (
+            <button className="text-button danger-text" disabled={!!busy || offline} onClick={() => onDelete(report)}>
+              <Icon name="trash" size={14} /> Delete saved report
+            </button>
+          )}
+        </div>
+      </div>
     </details>
   );
 }
@@ -282,7 +358,7 @@ export default function App() {
   const [listError, setListError] = useState("");
   const listRequestId = useRef(0);
   const [dialog, setDialog] = useState<
-    "settings" | "notifications" | "guide" | "delete" | "clear" | null
+    "settings" | "notifications" | "reports" | "guide" | "delete" | "clear" | null
   >(null);
   const [draft, setDraft] = useState({ label: "", recipient: "", notes: "" });
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(null);
@@ -294,6 +370,22 @@ export default function App() {
   const eventsRequestId = useRef(0);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsError, setEventsError] = useState("");
+  const [pixelReport, setPixelReport] = useState<PixelReport | null>(null);
+  const [pixelReportLoading, setPixelReportLoading] = useState(false);
+  const [pixelReportError, setPixelReportError] = useState("");
+  const pixelReportRequestId = useRef(0);
+  const [reports, setReports] = useState<PixelReport[]>([]);
+  const [reportsTotal, setReportsTotal] = useState(0);
+  const [reportsNextOffset, setReportsNextOffset] = useState(0);
+  const [reportsHasMore, setReportsHasMore] = useState(false);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportsError, setReportsError] = useState("");
+  const [focusedReport, setFocusedReport] = useState<PixelReport | null>(null);
+  const [reportToDelete, setReportToDelete] = useState<PixelReport | null>(null);
+  const reportsRefreshRef = useRef<HTMLButtonElement>(null);
+  const reportsRequestId = useRef(0);
+  const reportsExpandedRef = useRef(false);
+  const reportsPendingRef = useRef(false);
   const [copyNotice, setCopyNotice] = useState("");
   const detailRef = useRef<HTMLElement>(null);
   const deepLinkOpened = useRef(false);
@@ -466,6 +558,76 @@ export default function App() {
     };
   }, [loadEvents, selectedId]);
 
+  const loadPixelReport = useCallback(async (quiet = false) => {
+    if (!selectedId) return;
+    const requestId = ++pixelReportRequestId.current;
+    if (!quiet) setPixelReportLoading(true);
+    try {
+      const next = await request<PixelReport | null>(`/api/pixels/${selectedId}/report`);
+      if (requestId !== pixelReportRequestId.current) return;
+      setPixelReport(next);
+      setPixelReportError("");
+      if (next) setFocusedReport((current) => current?.id === next.id ? next : current);
+    } catch (err) {
+      if (requestId === pixelReportRequestId.current) setPixelReportError((err as Error).message);
+    } finally {
+      if (requestId === pixelReportRequestId.current) setPixelReportLoading(false);
+    }
+  }, [selectedId]);
+  useEffect(() => {
+    setPixelReport(null);
+    setPixelReportError("");
+    if (!selectedId) return;
+    void loadPixelReport();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible" && navigator.onLine) void loadPixelReport(true);
+    }, 15_000);
+    return () => {
+      pixelReportRequestId.current += 1;
+      window.clearInterval(timer);
+    };
+  }, [loadPixelReport, selectedId]);
+
+  const loadReports = useCallback(async (offset = 0, quiet = false) => {
+    if (quiet && (reportsExpandedRef.current || reportsPendingRef.current)) return;
+    const requestId = ++reportsRequestId.current;
+    reportsPendingRef.current = true;
+    if (!quiet) setReportsLoading(true);
+    try {
+      const page = await request<ReportPage>(`/api/reports?${new URLSearchParams({ limit: "100", offset: String(offset) })}`);
+      if (requestId !== reportsRequestId.current) return;
+      setReports((current) => offset
+        ? [...current, ...page.items.filter((item) => !current.some((report) => report.id === item.id))]
+        : page.items);
+      setFocusedReport((current) => current ? page.items.find((item) => item.id === current.id) || current : null);
+      setReportsTotal(page.total);
+      setReportsNextOffset(page.offset + page.items.length);
+      setReportsHasMore(page.hasMore);
+      reportsExpandedRef.current = offset > 0;
+      setReportsError("");
+    } catch (err) {
+      if (requestId === reportsRequestId.current) setReportsError((err as Error).message);
+    } finally {
+      if (requestId === reportsRequestId.current) {
+        reportsPendingRef.current = false;
+        setReportsLoading(false);
+      }
+    }
+  }, []);
+  useEffect(() => {
+    if (dialog !== "reports") return;
+    reportsExpandedRef.current = false;
+    void loadReports();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible" && navigator.onLine) void loadReports(0, true);
+    }, 15_000);
+    return () => {
+      reportsRequestId.current += 1;
+      reportsPendingRef.current = false;
+      window.clearInterval(timer);
+    };
+  }, [dialog, loadReports]);
+
   async function action(key: string, task: () => Promise<void>) {
     if (busy) return;
     setBusy(key);
@@ -486,6 +648,9 @@ export default function App() {
     });
     setSelectedId(pixel.id);
     setSelectedRecord(pixel);
+    setPixelReport(null);
+    setPixelReportError("");
+    setPixelReportLoading(true);
     selectedIdRef.current = pixel.id;
     setCopyNotice("");
   }
@@ -597,6 +762,24 @@ export default function App() {
       setDialog("settings");
     }
   }
+  function openReports(report: PixelReport | null = null) {
+    setFocusedReport(report);
+    setDialog("reports");
+  }
+  async function retryReport(id: string) {
+    await action(`report-${id}`, async () => {
+      await request(`/api/reports/${id}/retry`, { method: "POST", body: "{}" });
+      await Promise.all([loadReports(), loadPixelReport(true)]);
+      setToast("Report retry requested. Email-service acceptance will appear here.");
+    });
+  }
+  async function viewReportPixel(pixelId: string) {
+    await action("report-view", async () => {
+      choose(await request<Pixel>(`/api/pixels/${pixelId}`));
+      setDialog(null);
+      window.setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+    });
+  }
   const filtered = listItems;
   const dirty =
     !!selected &&
@@ -670,6 +853,9 @@ export default function App() {
             {unread > 0 && (
               <span className="nav-count unread-count">{unread}</span>
             )}
+          </button>
+          <button className="nav-link" onClick={() => openReports()} aria-haspopup="dialog">
+            <Icon name="report" /> Reports
           </button>
           <button
             className={filter === "archived" ? "nav-link selected" : "nav-link"}
@@ -1113,11 +1299,37 @@ export default function App() {
                             ? "This record is protected from automatic cleanup."
                             : data.settings.keepUnloadedPixels
                               ? "Your preferences keep all never-loaded pixels. This checkbox also protects this pixel if you turn 90-day cleanup back on."
-                              : "If it never records a load, this pixel and its label and notes are deleted 90 days after creation. Any recorded load makes its history permanent."}
+                              : "If it never records a load, this pixel becomes eligible for cleanup after 90 days, once its 89-day report is accepted by the email service. Unsent or failed reports keep the record here. Any recorded load makes its history permanent."}
                         </p>
                       </>
                     )}
                   </div>
+                  <section className="pixel-report" aria-label="89-day pixel report">
+                    <div className="pixel-report-heading">
+                      <h3>89-day report</h3>
+                      <button className="icon-button" onClick={() => void loadPixelReport()} disabled={pixelReportLoading || offline} aria-label="Refresh pixel report status">
+                        <Icon name="refresh" size={15} />
+                      </button>
+                    </div>
+                    <p>Scheduled from <time dateTime={reportDueAt(selected.createdAt)}>{formatDate(reportDueAt(selected.createdAt), true)}</time>, 89 days after creation.</p>
+                    {pixelReportLoading && <p className="quiet-note" role="status">Checking report status…</p>}
+                    {pixelReportError && <p className="field-error" role="alert">{pixelReportError}</p>}
+                    {!pixelReportLoading && !pixelReportError && (
+                      <>
+                        <span className="report-status" data-status={pixelReport?.status || "scheduled"}>
+                          {pixelReport ? reportStatusNames[pixelReport.status] : "Scheduled"}
+                        </span>
+                        <p className="quiet-note">
+                          {pixelReport ? "A saved snapshot is available." : "A snapshot is created when scheduled processing reaches this date."}
+                          {!selected.hasRecordedLoad ? " Never-loaded pixels receive a report too." : ""}
+                        </p>
+                      </>
+                    )}
+                    {!data.notificationConfigured && <p className="report-warning">Reports will queue, but won’t be emailed until sending is configured.</p>}
+                    <button className="text-button" onClick={() => openReports(pixelReport)}>
+                      {pixelReport ? "View report" : "Browse reports"} <Icon name="arrow" size={14} />
+                    </button>
+                  </section>
                   {selected.status !== "archived" && (
                     <button
                       className="button primary full-width arm-button"
@@ -1390,9 +1602,26 @@ export default function App() {
               Turning collection off stops saving details for future loads.
               Once a pixel records a load, its history and saved details are kept
               permanently unless you clear the activity or delete the pixel.
-              Pixels that never load are deleted 90 days after creation unless
-              you keep them individually or keep all never-loaded pixels in
-              preferences. A proxy or scanner request also counts as a load.
+              Never-loaded pixels become eligible for cleanup after 90 days
+              only once their report is accepted by the email service, unless
+              you keep them individually or in preferences. Unsent or failed
+              reports keep the pixel here. A proxy or scanner request also
+              counts as a load.
+            </p>
+            <h3>Your 89-day pixel report</h3>
+            <p>
+              Every pixel gets one saved report after 89 days from creation,
+              including pixels that never load. Reports are emailed to{" "}
+              {data.ownerEmail}, independently of image-load alert preferences.
+              If sending is not configured, reports queue until it is ready.
+            </p>
+            <p>
+              Reports include a summary and a private link to the full load
+              history. Emails omit notes, raw IP addresses and User-Agent text.
+              “Accepted by email service” does not confirm inbox delivery.
+              Automatic cleanup can remove a never-loaded pixel while keeping
+              its report; the history link will then be unavailable. Deleting
+              a pixel yourself also removes its saved report.
             </p>
             <h3>After sending</h3>
             <p>
@@ -1435,7 +1664,7 @@ export default function App() {
             <div className="dialog-body">
               <div className="setting-row">
                 <div>
-                  <strong>Email notifications</strong>
+                  <strong>Image-load email alerts</strong>
                   <p>
                     {data.development
                       ? "Simulate email alerts locally. No email is sent."
@@ -1462,6 +1691,20 @@ export default function App() {
                     : "Email delivery needs sender configuration. In-app activity remains available."}
                 </p>
               )}
+              <div className="settings-report-note">
+                <strong>89-day pixel reports</strong>
+                <p>
+                  Every pixel gets a report after 89 days, including those
+                  that never load. Reports go to {data.ownerEmail}, even when
+                  image-load email alerts are off.
+                </p>
+                <p>
+                  Emails include a summary and private history link, and omit
+                  notes, raw IP addresses and User-Agent text.
+                </p>
+                {!data.notificationConfigured && <p className="report-warning">Reports will queue, but won’t be emailed until sending is configured.</p>}
+                {data.development && <p>Local mode records test reports without sending email.</p>}
+              </div>
               <div className="setting-row">
                 <div>
                   <strong>Repeat alerts</strong>
@@ -1516,9 +1759,10 @@ export default function App() {
                 <div>
                   <strong id="keep-unloaded-title">Keep all never-loaded pixels</strong>
                   <p id="keep-unloaded-description">
-                    When off, never-loaded pixels are deleted 90 days after
-                    creation unless you keep a specific pixel. Turn on to keep
-                    all of them permanently.
+                    When off, never-loaded pixels can be deleted after 90 days,
+                    once their report is accepted by the email service, unless
+                    you keep a specific pixel. Turn on to keep all of them
+                    permanently.
                   </p>
                 </div>
                 <input
@@ -1537,7 +1781,8 @@ export default function App() {
                 are kept permanently, including when archived. Clearing activity
                 or deleting a pixel still removes that data. Turning this setting
                 off makes unprotected never-loaded pixels older than 90 days
-                eligible for the next cleanup.
+                eligible for cleanup once their report is accepted by the email
+                service. Unsent or failed reports hold the record.
               </p>
               {error && (
                 <p role="alert" className="field-error">
@@ -1562,6 +1807,76 @@ export default function App() {
               </button>
             </div>
           </form>
+        </Dialog>
+      )}
+      {dialog === "reports" && (
+        <Dialog title="89-day pixel reports" onClose={() => setDialog(null)} wide>
+          <div className="report-dialog-intro">
+            <p>Every pixel gets one report after 89 days, including never-loaded pixels. Reports are emailed only to <strong>{data.ownerEmail}</strong>.</p>
+            <p>Emails contain a summary and private history link. Notes, raw IP addresses and User-Agent text stay out of the email.</p>
+            {!data.notificationConfigured && <p className="report-warning">Reports will queue, but won’t be emailed until sending is configured.</p>}
+            {data.development && <p className="report-warning">Local mode records test reports without sending email.</p>}
+          </div>
+          <div className="reports-toolbar">
+            {focusedReport ? (
+              <button className="text-button" onClick={() => setFocusedReport(null)}>All reports</button>
+            ) : <span>{reports.length} of {reportsTotal} saved reports</span>}
+            <button ref={reportsRefreshRef} className="text-button" disabled={reportsLoading || offline} onClick={() => void loadReports()}>
+              <Icon name="refresh" size={15} /> Refresh
+            </button>
+          </div>
+          {reportsError && <p className="field-error report-list-error" role="alert">{reportsError} Use Refresh to retry.</p>}
+          {reportsLoading && <p className="report-list-status" role="status">Loading reports…</p>}
+          <div className="reports-list">
+            {focusedReport ? (
+              <ReportCard report={focusedReport} expanded busy={busy} offline={offline}
+                onRetry={(id) => void retryReport(id)} onView={(id) => void viewReportPixel(id)} onDelete={setReportToDelete} />
+            ) : reports.length > 0 ? reports.map((report) => (
+              <ReportCard key={report.id} report={report} busy={busy} offline={offline}
+                onRetry={(id) => void retryReport(id)} onView={(id) => void viewReportPixel(id)} onDelete={setReportToDelete} />
+            )) : !reportsLoading && !reportsError ? (
+              <div className="reports-empty">
+                <Icon name="report" size={30} />
+                <h3>No saved reports yet.</h3>
+                <p>A pixel’s report appears here when scheduled processing reaches 89 days after its creation. Pixels that never load are included.</p>
+              </div>
+            ) : null}
+          </div>
+          {!focusedReport && reportsHasMore && (
+            <div className="reports-more">
+              <button className="button secondary" disabled={reportsLoading || offline} onClick={() => void loadReports(reportsNextOffset)}>
+                {reportsLoading ? "Loading…" : "Load more reports"}
+              </button>
+            </div>
+          )}
+          {error && <p className="field-error dialog-error" role="alert">{error}</p>}
+          <div className="report-dialog-footer">
+            <p>Snapshots stay as recorded. A saved report is retained if automatic cleanup removes a never-loaded pixel; its history link may then be unavailable.</p>
+            {reportsExpandedRef.current && <p>Refresh starts again with the newest reports.</p>}
+          </div>
+        </Dialog>
+      )}
+      {reportToDelete && (
+        <Dialog title="Delete this saved report?" onClose={() => setReportToDelete(null)}>
+          <div className="dialog-body">
+            <p>This permanently removes the saved report for a pixel that is no longer available. It cannot be undone, and it cannot recall an email already sent.</p>
+            <strong>{reportToDelete.label || "Untitled message"}</strong>
+            {error && <p className="field-error" role="alert">{error}</p>}
+          </div>
+          <div className="dialog-footer">
+            <button className="button secondary" onClick={() => setReportToDelete(null)}>Keep report</button>
+            <button className="button destructive" disabled={!!busy || offline} onClick={() => void action("report-delete", async () => {
+              const id = reportToDelete.id;
+              await request(`/api/reports/${id}`, { method: "DELETE" });
+              setFocusedReport((current) => current?.id === id ? null : current);
+              await loadReports();
+              setReportToDelete(null);
+              setToast("Saved report deleted.");
+              window.setTimeout(() => reportsRefreshRef.current?.focus(), 0);
+            })}>
+              {busy === "report-delete" ? "Deleting…" : "Delete saved report"}
+            </button>
+          </div>
         </Dialog>
       )}
       {dialog === "notifications" && (
@@ -1662,8 +1977,8 @@ export default function App() {
           <div className="dialog-body">
             <p>
               {dialog === "delete"
-                ? "This removes the pixel’s label, notes, activity, saved request details and notifications. Future image requests will not be tracked. This cannot be undone."
-                : "This removes the recorded activity, including saved request details, and resets the summary counts for this pixel. Its label, notes and current alert state stay in place. This cannot be undone."}
+                ? "This removes the pixel’s label, notes, activity, saved request details, notifications and saved report. Future image requests will not be tracked. This cannot be undone or recall report emails already sent."
+                : "This removes the recorded activity, including saved request details, and resets the summary counts for this pixel. Its label, notes, any saved report snapshot and current alert state stay in place. This cannot be undone."}
             </p>
             <strong>{selected.label || "Untitled message"}</strong>
             {error && (

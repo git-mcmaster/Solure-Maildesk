@@ -3,6 +3,7 @@ import { getPixel, getSettings, listNotifications, listPixels, notificationConfi
 import { errorResponse, HttpError, json, onlyFields, readJson, securityHeaders, stringField } from './http';
 import { dispatchNotifications, enforceRetention } from './notifications';
 import { parseRequestMetadata } from './request-metadata';
+import { dispatchPixelReports, getPixelReport, listReports, queuePixelReports } from './reports';
 import type { Bootstrap, Env, LoadEvent, LoadEventPage, PixelStatus } from './types';
 
 const statuses = new Set<PixelStatus>(['draft', 'armed', 'paused', 'archived']);
@@ -112,11 +113,13 @@ async function api(request: Request, env: Env): Promise<Response> {
     if (!created.meta.changes) throw new HttpError(409, 'PIXEL_LIMIT', 'This version supports 50,000 saved pixels. Export and delete older records to make room.');
     return json(await getPixel(env, id), 201);
   }
-  const match = /^\/api\/pixels\/([^/]+)(\/events)?$/u.exec(path);
+  const match = /^\/api\/pixels\/([^/]+)(\/(?:events|report))?$/u.exec(path);
   if (match) {
     const id = match[1]!;
     const pixel = await requirePixel(env, id);
-    if (match[2]) {
+    if (match[2] === '/report') {
+      if (method === 'GET') return json(await getPixelReport(env, id));
+    } else if (match[2]) {
       if (method === 'GET') {
         return json(await listEvents(env, id, url.searchParams));
       }
@@ -130,7 +133,13 @@ async function api(request: Request, env: Env): Promise<Response> {
       }
     } else {
       if (method === 'GET') return json(pixel);
-      if (method === 'DELETE') { await env.DB.prepare('DELETE FROM pixels WHERE id=?').bind(id).run(); return json({ deleted: true }); }
+      if (method === 'DELETE') {
+        await env.DB.batch([
+          env.DB.prepare('DELETE FROM pixel_reports WHERE source_pixel_id=?').bind(id),
+          env.DB.prepare('DELETE FROM pixels WHERE id=?').bind(id),
+        ]);
+        return json({ deleted: true });
+      }
       if (method === 'PATCH') {
         const body = await readJson(request);
         onlyFields(body, ['label', 'recipient', 'notes', 'status', 'preserveUnloaded']);
@@ -169,6 +178,29 @@ async function api(request: Request, env: Env): Promise<Response> {
     return json(await getSettings(env));
   }
   if (path === '/api/notifications' && method === 'GET') return json(await listNotifications(env));
+  if (path === '/api/reports' && method === 'GET') {
+    for (const key of url.searchParams.keys()) if (!['limit', 'offset'].includes(key) || url.searchParams.getAll(key).length !== 1) throw new HttpError(400, 'INVALID_QUERY', 'Choose a valid report page.');
+    const limit = url.searchParams.get('limit') ?? '100';
+    const offset = url.searchParams.get('offset') ?? '0';
+    if (!/^[1-9][0-9]{0,2}$/u.test(limit) || Number(limit) > 200 || !/^(?:0|[1-9][0-9]{0,6})$/u.test(offset)) throw new HttpError(400, 'INVALID_QUERY', 'Choose 1 to 200 reports per page and a valid offset.');
+    return json(await listReports(env, Number(limit), Number(offset)));
+  }
+  const reportDelete = /^\/api\/reports\/([^/]+)$/u.exec(path);
+  if (reportDelete && method === 'DELETE') {
+    if (!opaqueId.test(reportDelete[1]!)) throw new HttpError(404, 'NOT_FOUND', 'This report could not be found.');
+    const deleted = await env.DB.prepare('DELETE FROM pixel_reports WHERE id=? AND pixel_id IS NULL').bind(reportDelete[1]!).run();
+    if (deleted.meta.changes !== 1) throw new HttpError(409, 'REPORT_NOT_DELETABLE', 'Delete the linked pixel to remove its report, or refresh if this report was already removed.');
+    return json({ deleted: true });
+  }
+  const reportRetry = /^\/api\/reports\/([^/]+)\/retry$/u.exec(path);
+  if (reportRetry && method === 'POST') {
+    if (!opaqueId.test(reportRetry[1]!)) throw new HttpError(404, 'NOT_FOUND', 'This report could not be found.');
+    onlyFields(await readJson(request), []);
+    const retry = await env.DB.prepare("UPDATE pixel_reports SET status='pending',attempts=0,last_error=NULL,next_attempt_at=?,lease_token=NULL,lease_until=NULL WHERE id=? AND status='failed'")
+      .bind(new Date().toISOString(), reportRetry[1]!).run();
+    if (retry.meta.changes !== 1) throw new HttpError(409, 'REPORT_NOT_RETRYABLE', 'Only failed reports can be retried.');
+    return json({ queued: true });
+  }
   if (path === '/api/notifications/read' && method === 'POST') {
     const body = await readJson(request);
     onlyFields(body, ['ids']);
@@ -216,9 +248,11 @@ export async function fetchDashboard(request: Request, env: Env): Promise<Respon
   }
 }
 
-export async function runScheduled(env: Env): Promise<void> {
-  await enforceRetention(env);
-  await dispatchNotifications(env);
+export async function runScheduled(env: Env, time = new Date()): Promise<void> {
+  await queuePixelReports(env, time);
+  await dispatchPixelReports(env, time);
+  await enforceRetention(env, time);
+  await dispatchNotifications(env, time);
 }
 
 export default {

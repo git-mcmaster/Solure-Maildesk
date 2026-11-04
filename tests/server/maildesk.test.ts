@@ -3,10 +3,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { Miniflare } from 'miniflare';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { authenticate } from '../../src/server/auth';
-import { fetchDashboard } from '../../src/server/dashboard';
+import { fetchDashboard, runScheduled } from '../../src/server/dashboard';
 import { dispatchNotifications, enforceRetention } from '../../src/server/notifications';
 import { fetchPixel } from '../../src/server/pixel';
-import type { Bootstrap, Env, LoadEvent, LoadEventPage, Pixel, PixelPage, Settings } from '../../src/server/types';
+import { dispatchPixelReports, queuePixelReports } from '../../src/server/reports';
+import type { Bootstrap, Env, LoadEvent, LoadEventPage, Pixel, PixelPage, PixelReport, ReportPage, Settings } from '../../src/server/types';
 
 let mf: Miniflare;
 let env: Env;
@@ -24,7 +25,7 @@ async function applyMigration(DB: D1Database, file: string) {
 }
 
 beforeAll(async () => {
-  mf = new Miniflare({ modules: true, script: 'export default { fetch() { return new Response("test"); } };', compatibilityDate: '2026-07-30', d1Databases: { DB: 'maildesk-unit-tests', LEGACY_DB: 'maildesk-migration-tests' } });
+  mf = new Miniflare({ modules: true, script: 'export default { fetch() { return new Response("test"); } };', compatibilityDate: '2026-07-30', d1Databases: { DB: 'maildesk-unit-tests', LEGACY_DB: 'maildesk-migration-tests', REPORT_UPGRADE_DB: 'maildesk-report-upgrade-tests' } });
   const DB = await mf.getD1Database('DB') as unknown as D1Database;
   for (const file of (await readdir(migrations)).filter((name) => name.endsWith('.sql')).sort()) {
     await applyMigration(DB, file);
@@ -34,11 +35,11 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await env.DB.batch([
-    env.DB.prepare('DELETE FROM notifications'), env.DB.prepare('DELETE FROM events'), env.DB.prepare('DELETE FROM pixels'),
+    env.DB.prepare('DELETE FROM pixel_reports'), env.DB.prepare('DELETE FROM notifications'), env.DB.prepare('DELETE FROM events'), env.DB.prepare('DELETE FROM pixels'),
     env.DB.prepare('UPDATE settings SET email_enabled=0,repeat_alerts=0,capture_request_details=0,keep_unloaded_pixels=0,retention_days=90,event_day=NULL,event_count=0 WHERE id=1'),
   ]);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 afterAll(async () => { await mf?.dispose(); });
 
 async function api<T = unknown>(path: string, method = 'GET', body?: unknown, override: Partial<Env> = {}) {
@@ -436,6 +437,11 @@ describe('permanent loaded history and unused pixel cleanup', () => {
     await env.DB.prepare('UPDATE pixels SET created_at=? WHERE id=?').bind(new Date(cutoff + offset).toISOString(), pixel.id).run();
     return pixel;
   }
+  async function sentReports() {
+    for (let batch = 0; batch < 11; batch++) await queuePixelReports(env, cleanupAt);
+    await env.DB.prepare("UPDATE pixel_reports SET status='sent',delivered_at=?").bind(cleanupAt.toISOString()).run();
+    await env.DB.prepare('UPDATE pixels SET report_sent_at=? WHERE EXISTS (SELECT 1 FROM pixel_reports WHERE source_pixel_id=pixels.id)').bind(cleanupAt.toISOString()).run();
+  }
 
   it('backfills every legacy load signal without deleting history, and remembers subsequent inserts', async () => {
     const DB = await mf.getD1Database('LEGACY_DB') as unknown as D1Database;
@@ -468,6 +474,7 @@ describe('permanent loaded history and unused pixel cleanup', () => {
     const newer = await aged('Newer than cutoff', 1);
     const archived = await aged('Archived and unused');
     await api(`/api/pixels/${archived.id}`, 'PATCH', { status: 'archived' });
+    await sentReports();
     await enforceRetention(env, cleanupAt);
     for (const pixel of [old, archived]) expect((await api(`/api/pixels/${pixel.id}`)).response.status).toBe(404);
     for (const pixel of [exact, newer]) expect((await api(`/api/pixels/${pixel.id}`)).response.status).toBe(200);
@@ -490,6 +497,7 @@ describe('permanent loaded history and unused pixel cleanup', () => {
     await enforceRetention(env, cleanupAt);
     for (const pixel of [preserved, plain]) expect((await api(`/api/pixels/${pixel.id}`)).response.status).toBe(200);
     await api('/api/settings', 'PATCH', { keepUnloadedPixels: false });
+    await sentReports();
     await enforceRetention(env, cleanupAt);
     expect((await api(`/api/pixels/${plain.id}`)).response.status).toBe(404);
     expect((await api(`/api/pixels/${preserved.id}`)).response.status).toBe(200);
@@ -574,6 +582,7 @@ describe('permanent loaded history and unused pixel cleanup', () => {
     await enforceRetention({ ...env, DB: { prepare } as unknown as D1Database }, cleanupAt);
     expect(prepare).toHaveBeenCalledTimes(1);
     const pixel = await aged('Preserved during cleanup');
+    await sentReports();
     const DB = { prepare(sql: string) {
       if (sql === 'SELECT keep_unloaded_pixels FROM settings WHERE id=1') return { async first() {
         await env.DB.prepare('UPDATE settings SET keep_unloaded_pixels=1 WHERE id=1').run();
@@ -588,6 +597,7 @@ describe('permanent loaded history and unused pixel cleanup', () => {
   it('serializes first-load capture against cleanup without deleting a committed load or resurrecting a deleted pixel', async () => {
     for (let index = 0; index < 12; index++) {
       const pixel = await aged(`First-load race ${index}`);
+      await sentReports();
       const [image] = await Promise.all([load(pixel), enforceRetention(env, cleanupAt)]);
       expect(image.status).toBe(200);
       const row = await env.DB.prepare('SELECT has_recorded_load,load_count FROM pixels WHERE id=?').bind(pixel.id).first<{ has_recorded_load: number; load_count: number }>();
@@ -601,10 +611,265 @@ describe('permanent loaded history and unused pixel cleanup', () => {
     const old = new Date(cutoff - 1).toISOString();
     const statements = Array.from({ length: 1005 }, (_, index) => env.DB.prepare('INSERT INTO pixels(id,token,label,created_at,updated_at) VALUES(?,?,?,?,?)').bind(crypto.randomUUID(), index.toString(16).padStart(32, '0'), `Unused ${index}`, old, old));
     await env.DB.batch(statements);
+    await sentReports();
     await enforceRetention(env, cleanupAt);
     expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM pixels').first('count')).toBe(5);
     await enforceRetention(env, cleanupAt);
     expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM pixels').first('count')).toBe(0);
+  });
+});
+
+describe('89-day pixel reports', () => {
+  const day = 86_400_000;
+  const reportAt = new Date('2030-01-01T00:00:00.000Z');
+  async function oldPixel(age = 89, label = 'A message to report') {
+    const pixel = await create(label);
+    await env.DB.prepare('UPDATE pixels SET created_at=? WHERE id=?').bind(new Date(reportAt.getTime() - age * day).toISOString(), pixel.id).run();
+    return pixel;
+  }
+  async function report(pixel: Pixel) { return (await api<PixelReport | null>(`/api/pixels/${pixel.id}/report`)).data; }
+  function sender(send = vi.fn(async (_message: Parameters<NonNullable<Env['EMAIL']>['send']>[0]) => ({ messageId: 'test-report' }))) {
+    return { ...env, EMAIL_MODE: 'live' as const, EMAIL_FROM: 'maildesk@soluredigitalworks.com', EMAIL: { send } };
+  }
+
+  it('upgrades populated permanent-history storage without removing history or changing preservation choices', async () => {
+    const DB = await mf.getD1Database('REPORT_UPGRADE_DB') as unknown as D1Database;
+    for (const file of ['0001_initial.sql', '0002_daily_counters.sql', '0003_request_details.sql', '0004_permanent_loaded_history.sql']) await applyMigration(DB, file);
+    await DB.prepare("INSERT INTO pixels(id,token,label,preserve_unloaded,created_at,updated_at) VALUES('existing-pixel','0123456789abcdef0123456789abcdef','Existing loaded pixel',1,'2025-01-01T00:00:00.000Z','2025-01-01T00:00:00.000Z')").run();
+    await DB.prepare("INSERT INTO events(id,pixel_id,created_at,phase) VALUES('existing-event','existing-pixel','2025-01-02T00:00:00.000Z','before_arming')").run();
+    await DB.prepare('UPDATE settings SET keep_unloaded_pixels=1 WHERE id=1').run();
+    await applyMigration(DB, '0005_pixel_reports.sql');
+    expect(await DB.prepare('SELECT label,has_recorded_load,preserve_unloaded,report_queued_at,report_sent_at FROM pixels').first()).toEqual({ label: 'Existing loaded pixel', has_recorded_load: 1, preserve_unloaded: 1, report_queued_at: null, report_sent_at: null });
+    expect(await DB.prepare('SELECT keep_unloaded_pixels FROM settings').first('keep_unloaded_pixels')).toBe(1);
+    expect(await DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(1);
+    await queuePixelReports({ ...env, DB }, reportAt);
+    expect(await DB.prepare('SELECT status FROM pixel_reports').first('status')).toBe('pending');
+    expect(await DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(1);
+  });
+
+  it('queues at exactly 89 days for every status, once under concurrency, with an immutable private text snapshot', async () => {
+    const before = await oldPixel(89 - 1 / day, 'One millisecond too early');
+    const due = await oldPixel(89, '<img src="https://example.invalid"> Original label');
+    const archived = await oldPixel(90, 'Archived unused');
+    const loaded = await oldPixel(90, 'Loaded and paused');
+    await api(`/api/pixels/${due.id}`, 'PATCH', { recipient: 'recipient@example.com', notes: 'PRIVATE NOTE MUST NOT BE EMAILED' });
+    await api(`/api/pixels/${archived.id}`, 'PATCH', { status: 'archived' });
+    await api('/api/settings', 'PATCH', { captureRequestDetails: true });
+    await fetchPixel(detailedRequest(loaded), env);
+    await api(`/api/pixels/${loaded.id}`, 'PATCH', { status: 'paused' });
+    expect(await report(due)).toBeNull();
+    await Promise.all([queuePixelReports(env, reportAt), queuePixelReports(env, reportAt)]);
+    expect(await report(before)).toBeNull();
+    expect((await api<ReportPage>('/api/reports')).data.total).toBe(3);
+    const snapshot = await report(due);
+    expect(snapshot).toMatchObject({ sourcePixelId: due.id, label: due.label, recipient: 'recipient@example.com', status: 'pending', attempts: 0, dueAt: reportAt.toISOString() });
+    expect(snapshot!.text).toContain('Any image request ever recorded: No');
+    expect(snapshot!.text).toContain(`${origin}/?pixel=${due.id}`);
+    for (const secret of ['PRIVATE NOTE MUST NOT BE EMAILED', due.token, '198.51.100.23', 'Firefox/130.0']) expect(snapshot!.text).not.toContain(secret);
+    expect((await report(loaded))!.text).toContain('Current recorded image requests: 1');
+    expect((await report(loaded))!.text).toContain('An image request is not proof');
+    expect((await report(loaded))!.text).not.toContain('198.51.100.23');
+    await api(`/api/pixels/${due.id}`, 'PATCH', { label: 'Later label', recipient: 'later@example.com' });
+    await queuePixelReports(env, new Date(reportAt.getTime() + day));
+    expect(await report(due)).toEqual(snapshot);
+  });
+
+  it('bounds generation to 100 and skips marked snapshots on later passes', async () => {
+    const created = new Date(reportAt.getTime() - 100 * day).toISOString();
+    await env.DB.batch(Array.from({ length: 105 }, (_, index) => env.DB.prepare('INSERT INTO pixels(id,token,label,created_at,updated_at) VALUES(?,?,?,?,?)')
+      .bind(crypto.randomUUID(), index.toString(16).padStart(32, '0'), `Due ${index}`, created, created)));
+    await queuePixelReports(env, reportAt);
+    expect((await api<ReportPage>('/api/reports')).data.total).toBe(100);
+    await queuePixelReports(env, reportAt);
+    expect((await api<ReportPage>('/api/reports')).data.total).toBe(105);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM pixels WHERE report_queued_at IS NULL').first('count')).toBe(0);
+    await queuePixelReports(env, reportAt);
+    expect((await api<ReportPage>('/api/reports')).data.total).toBe(105);
+    const page1 = (await api<ReportPage>('/api/reports?limit=100&offset=0')).data;
+    const page2 = (await api<ReportPage>('/api/reports?limit=100&offset=100')).data;
+    expect(page1.hasMore).toBe(true);
+    expect(page2.hasMore).toBe(false);
+    expect(new Set([...page1.items, ...page2.items].map((item) => item.id)).size).toBe(105);
+  });
+
+  it('sends to the configured owner independently of per-load email alerts, and never renders user text as HTML', async () => {
+    const pixel = await oldPixel(89, 'Invoice\r\nBcc: other@example.com');
+    await api(`/api/pixels/${pixel.id}`, 'PATCH', { recipient: 'external@example.com' });
+    await queuePixelReports(env, reportAt);
+    const live = sender();
+    await dispatchPixelReports(live, reportAt);
+    expect(live.EMAIL.send).toHaveBeenCalledTimes(1);
+    expect(live.EMAIL.send).toHaveBeenCalledWith({ to: env.OWNER_EMAIL, from: live.EMAIL_FROM,
+      subject: '89-day pixel report — Invoice  Bcc: other@example.com', text: (await report(pixel))!.text });
+    expect((await api<Settings>('/api/settings')).data.emailEnabled).toBe(false);
+    expect(await report(pixel)).toMatchObject({ status: 'sent', attempts: 1, deliveredAt: reportAt.toISOString() });
+  });
+
+  it('holds unused pixels when delivery is unconfigured, failed, or only simulated locally', async () => {
+    const pixel = await oldPixel(100);
+    await queuePixelReports(env, reportAt);
+    await dispatchPixelReports({ ...env, EMAIL_MODE: undefined }, reportAt);
+    // The indexed marker alone is never enough to permit deletion.
+    await env.DB.prepare('UPDATE pixels SET report_sent_at=? WHERE id=?').bind(reportAt.toISOString(), pixel.id).run();
+    await enforceRetention(env, reportAt);
+    expect(await report(pixel)).toMatchObject({ status: 'pending', attempts: 0 });
+    expect((await api(`/api/pixels/${pixel.id}`)).response.status).toBe(200);
+    const send = vi.fn(async () => ({ messageId: 'not-called' }));
+    await dispatchPixelReports({ ...env, EMAIL: { send } }, reportAt);
+    expect(send).not.toHaveBeenCalled();
+    expect(await report(pixel)).toMatchObject({ status: 'dry_run', attempts: 1 });
+    await enforceRetention(env, reportAt);
+    expect((await api(`/api/pixels/${pixel.id}`)).response.status).toBe(200);
+    const another = await oldPixel(100, 'Production dry-run guard');
+    await queuePixelReports(env, reportAt);
+    await dispatchPixelReports({ ...env, EMAIL: { send }, DASHBOARD_ORIGIN: 'https://maildesk.soluredigitalworks.com', PIXEL_ORIGIN: 'https://pixel.soluredigitalworks.com' }, reportAt);
+    expect(await report(another)).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('claims each report atomically across concurrent dispatchers and bounds one pass to five emails', async () => {
+    for (let index = 0; index < 7; index++) await oldPixel(89, `Concurrent report ${index}`);
+    await queuePixelReports(env, reportAt);
+    const live = sender();
+    await Promise.all([dispatchPixelReports(live, reportAt), dispatchPixelReports(live, reportAt)]);
+    const items = (await api<ReportPage>('/api/reports')).data.items;
+    expect(items.filter((item) => item.status === 'sent').length).toBeGreaterThanOrEqual(5);
+    expect(live.EMAIL.send).toHaveBeenCalledTimes(items.filter((item) => item.status === 'sent').length);
+    expect(items.every((item) => item.attempts <= 1)).toBe(true);
+    expect(new Set(live.EMAIL.send.mock.calls.map(([message]) => message.text)).size).toBe(live.EMAIL.send.mock.calls.length);
+    const extra = await oldPixel(89, 'After concurrent run');
+    await queuePixelReports(env, reportAt);
+    live.EMAIL.send.mockClear();
+    await dispatchPixelReports(live, reportAt);
+    expect(live.EMAIL.send.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(await report(extra)).toMatchObject({ status: 'sent', attempts: 1 });
+  });
+
+  it('backs off failures, stops after five attempts, redacts provider errors and supports an authenticated retry', async () => {
+    const pixel = await oldPixel(100);
+    await queuePixelReports(env, reportAt);
+    const send = vi.fn(async (): Promise<{ messageId: string }> => { throw new Error('secret-provider-token-and-request-details'); });
+    const live = sender(send);
+    let time = reportAt;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      await dispatchPixelReports(live, time);
+      expect(await report(pixel)).toMatchObject({ status: 'failed', attempts: attempt });
+      await dispatchPixelReports(live, time);
+      expect(send).toHaveBeenCalledTimes(attempt);
+      time = new Date(time.getTime() + 3_600_000);
+    }
+    await dispatchPixelReports(live, time);
+    expect(send).toHaveBeenCalledTimes(5);
+    expect(JSON.stringify(await report(pixel))).not.toContain('secret-provider');
+    await enforceRetention(env, time);
+    expect((await api(`/api/pixels/${pixel.id}`)).response.status).toBe(200);
+    const id = (await report(pixel))!.id;
+    expect((await api(`/api/reports/${id}/retry`, 'POST', {})).response.status).toBe(200);
+    const working = sender();
+    await dispatchPixelReports(working, time);
+    expect(await report(pixel)).toMatchObject({ status: 'sent', attempts: 1 });
+    expect((await api(`/api/reports/${id}/retry`, 'POST', {})).response.status).toBe(409);
+  });
+
+  it('recovers expired delivery leases without stealing active claims', async () => {
+    const stale = await oldPixel();
+    const active = await oldPixel(89, 'Active claim');
+    await queuePixelReports(env, reportAt);
+    await env.DB.prepare("UPDATE pixel_reports SET status='sending',attempts=1,lease_token='old',lease_until=? WHERE source_pixel_id=?")
+      .bind(new Date(reportAt.getTime() - 1).toISOString(), stale.id).run();
+    await env.DB.prepare("UPDATE pixel_reports SET status='sending',attempts=1,lease_token='active',lease_until=? WHERE source_pixel_id=?")
+      .bind(new Date(reportAt.getTime() + 60_000).toISOString(), active.id).run();
+    const live = sender();
+    await dispatchPixelReports(live, reportAt);
+    expect(live.EMAIL.send).toHaveBeenCalledTimes(1);
+    expect(await report(stale)).toMatchObject({ status: 'sent', attempts: 2 });
+    expect(await report(active)).toMatchObject({ status: 'sending', attempts: 1 });
+  });
+
+  it('sends before automatic cleanup and keeps the delivered snapshot after unused pixel deletion', async () => {
+    const unused = await oldPixel(100, 'Report before deletion');
+    const loaded = await oldPixel(100, 'Loaded permanently');
+    await load(loaded);
+    const live = sender();
+    await runScheduled(live, reportAt);
+    expect(live.EMAIL.send).toHaveBeenCalledTimes(2);
+    expect((await api(`/api/pixels/${unused.id}`)).response.status).toBe(404);
+    expect((await api(`/api/pixels/${loaded.id}`)).response.status).toBe(200);
+    const reports = (await api<ReportPage>('/api/reports')).data.items;
+    const saved = reports.find((item) => item.sourcePixelId === unused.id)!;
+    expect(saved).toMatchObject({ pixelId: null, label: unused.label, status: 'sent' });
+    expect(reports.find((item) => item.sourcePixelId === loaded.id)).toMatchObject({ pixelId: loaded.id, status: 'sent' });
+    expect((await api<LoadEvent[]>(`/api/pixels/${loaded.id}/events`)).data).toHaveLength(1);
+    expect((await api(`/api/reports/${saved.id}`, 'DELETE')).response.status).toBe(200);
+    expect((await api<ReportPage>('/api/reports')).data.total).toBe(1);
+    expect((await api(`/api/reports/${reports.find((item) => item.sourcePixelId === loaded.id)!.id}`, 'DELETE')).response.status).toBe(409);
+  });
+
+  it('keeps a fully busy minute below the free-plan database invocation limit', async () => {
+    await api('/api/settings', 'PATCH', { emailEnabled: true });
+    for (let index = 0; index < 8; index++) {
+      const pixel = await oldPixel(89, `Busy minute ${index}`);
+      await arm(pixel);
+      await load(pixel);
+    }
+    let calls = 0;
+    function wrap(statement: D1PreparedStatement): D1PreparedStatement {
+      return new Proxy(statement, { get(target, key) {
+        if (key === 'bind') return (...values: unknown[]) => wrap(target.bind(...values));
+        const method = Reflect.get(target, key);
+        if (['all', 'first', 'run', 'raw'].includes(String(key))) return (...args: unknown[]) => { calls++; return Reflect.apply(method, target, args); };
+        return typeof method === 'function' ? method.bind(target) : method;
+      } });
+    }
+    const DB = { prepare: (sql: string) => wrap(env.DB.prepare(sql)), async batch(statements: D1PreparedStatement[]) {
+      calls++; return env.DB.batch(statements);
+    } } as unknown as D1Database;
+    const live = sender();
+    await runScheduled({ ...live, DB }, reportAt);
+    expect(calls).toBe(40);
+    expect(calls).toBeLessThan(50);
+    expect(live.EMAIL.send).toHaveBeenCalledTimes(10);
+    expect((await api<ReportPage>('/api/reports')).data.items.filter((item) => item.status === 'sent')).toHaveLength(5);
+  });
+
+  it('explicit owner deletion removes its queued report and cannot be undone by a delayed generation batch', async () => {
+    const pixel = await oldPixel(100);
+    let entered!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const DB = { prepare: (sql: string) => env.DB.prepare(sql), async batch(statements: D1PreparedStatement[]) {
+      entered(); await gate; return env.DB.batch(statements);
+    } } as unknown as D1Database;
+    const queue = queuePixelReports({ ...env, DB }, reportAt);
+    await waiting;
+    try { await api(`/api/pixels/${pixel.id}`, 'DELETE'); }
+    finally { release(); }
+    await queue;
+    expect((await api<ReportPage>('/api/reports')).data.total).toBe(0);
+    const another = await oldPixel(100);
+    await queuePixelReports(env, reportAt);
+    expect(await report(another)).not.toBeNull();
+    await api(`/api/pixels/${another.id}`, 'DELETE');
+    expect((await api<ReportPage>('/api/reports')).data.total).toBe(0);
+    const live = sender();
+    await dispatchPixelReports(live, reportAt);
+    expect(live.EMAIL.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps report access owner-only and validates report pagination and retry requests', async () => {
+    for (const query of ['limit=0', 'limit=201', 'limit=1.5', 'offset=-1', 'limit=1&limit=2', 'unknown=1']) {
+      expect((await api(`/api/reports?${query}`)).response.status).toBe(400);
+    }
+    const pixel = await oldPixel(89);
+    await queuePixelReports(env, reportAt);
+    const id = (await report(pixel))!.id;
+    expect((await api(`/api/reports/${id}/retry`, 'POST', { to: 'outsider@example.com' })).response.status).toBe(400);
+    const production = { ...env, DEV_AUTH: undefined, DASHBOARD_ORIGIN: 'https://maildesk.soluredigitalworks.com', ACCESS_TEAM_DOMAIN: 'reports-test.cloudflareaccess.com', ACCESS_AUD: 'reports-audience' };
+    for (const path of ['/api/reports', `/api/pixels/${pixel.id}/report`]) {
+      expect((await fetchDashboard(new Request(`${production.DASHBOARD_ORIGIN}${path}`), production)).status).toBe(401);
+    }
+    expect((await fetchDashboard(new Request(`${origin}/api/reports/${id}/retry`, { method: 'POST', headers: { Origin: 'https://elsewhere.invalid', 'Content-Type': 'application/json' }, body: '{}' }), env)).status).toBe(403);
   });
 });
 

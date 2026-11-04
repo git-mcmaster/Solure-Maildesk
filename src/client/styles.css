@@ -2579,3 +2579,316 @@ body {
     display: none;
   }
 }
+
+.pixel-report {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid #e1e5e9;
+  border-radius: 6px;
+  background: #fafbfc;
+  overflow-wrap: anywhere;
+}
+.pixel-report-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.pixel-report h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.pixel-report p,
+.settings-report-note p {
+  color: #596675;
+  font-size: 13px;
+  line-height: 1.75;
+  margin-top: 7px;
+}
+.pixel-report .report-status {
+  margin-top: 12px;
+}
+.pixel-report > .text-button {
+  min-height: 44px;
+  font-size: 13px;
+  margin-top: 6px;
+}
+.report-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px;
+  border: 1px solid #dce1e6;
+  border-radius: 5px;
+  color: #465564;
+  background: #f5f7f9;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.report-status[data-status="sent"] {
+  color: #365d39;
+  background: #f0f6ee;
+  border-color: #d7e5d2;
+}
+.report-status[data-status="failed"] {
+  color: #8d3d2d;
+  background: #fff3ee;
+  border-color: #efd6ca;
+}
+.report-status[data-status="dry_run"] {
+  color: #71573a;
+  background: #fbf6eb;
+}
+.report-warning,
+.pixel-report .report-warning,
+.settings-report-note .report-warning {
+  padding: 10px 12px;
+  border-radius: 5px;
+  color: #71573a;
+  background: #fbf6eb;
+  font-size: 13px;
+  line-height: 1.75;
+}
+.settings-report-note {
+  margin-bottom: 20px;
+  padding-bottom: 19px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.settings-report-note > strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.report-dialog-intro,
+.report-dialog-footer {
+  padding: 17px 23px;
+  color: #596675;
+  font-size: 13px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.report-dialog-intro p + p,
+.report-dialog-footer p + p {
+  margin-top: 9px;
+}
+.report-dialog-intro strong {
+  color: #34414f;
+  font-weight: 600;
+}
+.reports-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 7px 23px;
+  border-block: 1px solid var(--line);
+  color: #596675;
+  font-size: 13px;
+}
+.reports-toolbar .text-button {
+  min-height: 44px;
+  font-size: 13px;
+}
+.reports-list {
+  padding: 16px 23px;
+  min-width: 0;
+}
+.report-card {
+  border: 1px solid #e1e5e9;
+  border-radius: 7px;
+  background: #fff;
+  min-width: 0;
+}
+.report-card + .report-card {
+  margin-top: 12px;
+}
+.report-card > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px;
+  cursor: pointer;
+  list-style: none;
+  min-height: 66px;
+}
+.report-card > summary::-webkit-details-marker {
+  display: none;
+}
+.report-card > summary::before {
+  content: "›";
+  color: #596675;
+  font-size: 24px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.report-card[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+.report-card[open] > summary::before {
+  transform: rotate(90deg);
+}
+.report-title {
+  min-width: 0;
+  flex: 1;
+}
+.report-title > strong,
+.report-title > span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.report-title > strong {
+  color: #263440;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.report-title > span {
+  margin-top: 3px;
+  color: #596675;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.report-card > summary > .report-status {
+  max-width: 185px;
+}
+.report-card-body {
+  padding: 16px;
+}
+.report-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  margin: 0 0 16px;
+}
+.report-facts dt {
+  color: #596675;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.report-facts dd {
+  margin: 3px 0 0;
+  color: #34414f;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.report-card-body h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 20px 0 9px;
+}
+.report-snapshot {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #e9e1d4;
+  border-radius: 5px;
+  color: #34414f;
+  background: #fbf8f2;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.report-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 13px;
+}
+.report-card-actions .button,
+.report-card-actions .text-button {
+  min-height: 44px;
+  font-size: 13px;
+}
+.report-card-actions .danger-text {
+  color: #8d3d2d;
+}
+.report-list-status,
+.report-list-error {
+  padding: 12px 23px 0;
+  font-size: 13px;
+  line-height: 1.75;
+}
+.reports-empty {
+  text-align: center;
+  padding: 28px 10px;
+  color: #596675;
+}
+.reports-empty > svg {
+  color: #71573a;
+  margin-bottom: 13px;
+}
+.reports-empty h3 {
+  color: #34414f;
+  font-size: 16px;
+  font-weight: 550;
+}
+.reports-empty p {
+  margin: 9px auto 0;
+  max-width: 360px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+.reports-more {
+  padding: 0 23px 16px;
+}
+.report-dialog-footer {
+  border-top: 1px solid var(--line);
+  background: #fcfcfd;
+}
+@media (max-width: 560px) {
+  .report-dialog-intro,
+  .reports-toolbar,
+  .reports-list,
+  .report-dialog-footer {
+    padding-inline: 16px;
+  }
+  .report-card > summary {
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr);
+    gap: 8px 10px;
+    padding: 12px;
+  }
+  .report-card > summary > .report-status {
+    grid-column: 2;
+    max-width: 100%;
+    justify-self: start;
+  }
+  .report-card-body {
+    padding: 12px;
+  }
+  .report-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .report-snapshot {
+    padding: 11px;
+  }
+}
+@media (max-width: 380px) {
+  .sidebar {
+    gap: 6px;
+    padding-inline: 10px;
+  }
+  .sidebar .brand {
+    gap: 5px;
+  }
+  .sidebar .brand strong {
+    font-size: 17px;
+    letter-spacing: -0.8px;
+  }
+  .sidebar .brand-caption {
+    font-size: 8px;
+    letter-spacing: 1px;
+  }
+}
+@media (max-width: 360px) {
+  .sidebar {
+    gap: 2px;
+    padding-inline: 8px;
+  }
+}

@@ -15,7 +15,8 @@ export async function dispatchNotifications(env: Env, time = new Date()): Promis
   // Recover abandoned claims. Email providers can accept a message just before
   // a process fails; retries may therefore duplicate an email in that window.
   await env.DB.prepare("UPDATE notifications SET status='failed',lease_until=NULL,lease_token=NULL WHERE status='sending' AND lease_until<?").bind(now).run();
-  const due = await env.DB.prepare("SELECT id FROM notifications WHERE status IN ('pending','failed') AND attempts<5 AND next_attempt_at<=? ORDER BY created_at LIMIT 10").bind(now).all<{ id: string }>();
+  // Share the free-plan D1 invocation budget with scheduled 89-day reports.
+  const due = await env.DB.prepare("SELECT id FROM notifications WHERE status IN ('pending','failed') AND attempts<5 AND next_attempt_at<=? ORDER BY created_at LIMIT 5").bind(now).all<{ id: string }>();
   for (const { id } of due.results) {
     const lease = crypto.randomUUID();
     const until = new Date(time.getTime() + 300_000).toISOString();
@@ -52,12 +53,13 @@ export async function enforceRetention(env: Env, time = new Date()): Promise<voi
   // Loaded events/metadata/notifications have no automatic expiry.
   await env.DB.prepare(`DELETE FROM pixels WHERE id IN (
     SELECT p.id FROM pixels p
-    WHERE p.has_recorded_load=0 AND p.preserve_unloaded=0 AND p.created_at<?
+    WHERE p.has_recorded_load=0 AND p.preserve_unloaded=0 AND p.report_sent_at IS NOT NULL AND p.created_at<?
       AND EXISTS (SELECT 1 FROM settings WHERE id=1 AND keep_unloaded_pixels=0)
       AND p.load_count=0 AND p.early_load_count=0 AND p.daily_load_count=0
       AND p.first_loaded_at IS NULL AND p.last_loaded_at IS NULL AND p.first_alert_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM events e WHERE e.pixel_id=p.id)
       AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.pixel_id=p.id)
+      AND EXISTS (SELECT 1 FROM pixel_reports r WHERE r.source_pixel_id=p.id AND r.status='sent')
     ORDER BY p.created_at,p.id LIMIT 1000
   )`).bind(cutoff).run();
 }
