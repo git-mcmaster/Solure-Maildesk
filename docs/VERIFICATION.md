@@ -1,8 +1,8 @@
 # Verification record
 
-## 89-day reports — November 4, 2026, local implementation
+## 89-day reports — November 4, 2026
 
-Implemented locally following the owner’s request for a report for every pixel at 89 days from creation, emailed to the fixed Solure owner address. This section does **not** establish source publication, remote migration, deployment, real scheduler execution after 89 days, provider acceptance or inbox delivery. Earlier dated production evidence below remains historical.
+Implemented following the owner’s request for a report for every pixel at 89 days from creation, emailed to the fixed Solure owner address. The following table records local validation; publication and production evidence appear in the separate subsection below. Neither establishes actual processing after 89 elapsed days or inbox delivery. Earlier dated production evidence remains historical.
 
 | Check | Observed result |
 | --- | --- |
@@ -24,7 +24,19 @@ Reports use the minute schedule, so they become due 89 elapsed days after creati
 
 `sent` records provider acceptance, not inbox delivery. A provider can accept immediately before a process crash, so a later retry can duplicate an email; no undocumented provider idempotency feature was assumed. Email delivery already in flight cannot be recalled by deletion. No live email was sent by these checks.
 
-The owner has verified the Cloudflare destination. The production native sending binding/sender remains unconfigured; the Email Sending UI still requires Workers Paid. Apex Email Routing onboarding was canceled without changing Microsoft mail DNS. An API/subdomain-only free path remains under investigation, not a verified sender. Current-source CI, current production-export migration rehearsal, publication, deployment, live report UI/scheduler checks and actual owner inbox delivery remain separate gates. Follow the migration/rollback warning in [RELEASE.md](RELEASE.md): older cleanup code does not preserve the new report-before-delete requirement.
+Sender setup was investigated alongside local validation. The production native sending binding/sender remained unconfigured; the Email Sending UI required Workers Paid. Apex Email Routing onboarding was canceled without changing Microsoft mail DNS. An API/subdomain-only free path was investigated but not activated. The following subsection records the subsequent source and production checks; actual owner inbox delivery remains a separate gate. Follow the migration/rollback warning in [RELEASE.md](RELEASE.md): older cleanup code does not preserve the new report-before-delete requirement.
+
+### Report source publication and production release
+
+- Published source `e5f423a07a4719eb5334ad295d2dc6eec0cd1165`, tree `b9f65be35af341417d8a700685b148f611315a11`, matches local source `ff5a594a264630f5cf3db62d103b88932282d799`. [CI run 41802564631](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41802564631) passed before the production migration/deployment.
+- Refreshed the existing Wrangler deployment authorization with the same seven permissions and SolureDigital-only scope; no new email or zone-settings permission was included. The first export attempt failed authentication; the refreshed retry succeeded. The private SQL backup was stored outside Git with owner-only file access. Applying `0005` to a disposable copy preserved four pixels, eight events and two notifications. No existing record was eligible for the older scheduler’s 90-day cleanup during the migration-first window.
+- Remote `0005_pixel_reports.sql` applied successfully to the dedicated Maildesk database. Dashboard version `[internal identifier recorded privately]` deployed to the existing custom domain with the existing minute schedule. Public pixel Worker code/version remained unchanged.
+- Authenticated production Reports opened successfully with zero saved reports, as expected because all current pixels are younger than 89 days. The existing owner-workflow pixel showed its calculated January 31, 2027 report date, permanent loaded-history policy and sender-unconfigured notice. No production records were aged artificially or seeded with report fixtures.
+- Read-only production checks preserved all four loaded/permanent pixels, eight events and two notifications; the report table was empty, and all three new query/foreign-key indexes existed. Capture remains on, global unused preservation off, and optional image-load email/repeat alerts off.
+- Unauthenticated requests to the new report-list API and deployed hashed JavaScript returned 302 to the exact owner Access login; public pixel code and its deployment were unchanged.
+- The Cloudflare destination page independently showed the exact owner email as **Verified**. The temporary Zone Settings Edit / DNS Read credential was only prepared for review, not created: the owner requested an explanation rather than approving it. Email sending therefore remains unconfigured. No report email or paid upgrade occurred, and no Microsoft mail/DNS record was changed. Independent public DNS still showed Microsoft’s priority-zero MX.
+
+The deployed schedule and due-date interface are verified; processing at a real elapsed 89-day boundary and actual report inbox delivery remain unverified. Local clocks/provider stubs establish logic, not those outcomes. Never-loaded pixels remain protected from cleanup until an email service accepts their report. Source/CI/deployment completion must not be described as email delivery completion.
 
 ## Conditional retention — November 4, 2026
 
@@ -59,7 +71,7 @@ A separate read-only review and disposable SQLite query-plan inspection confirme
 - Published source `fab3ee42d8a3cc27b6e50a70c59ba5808deebb0a`, tree `74356f28653fa12580acc170767ebbbf2db75b0c`, exactly matches local source `c2d3a7e3e4aa554aa73ecf53c18698a984335724` (37 tracked paths). No private backup, tracking token, activity fixture or request metadata was published.
 - [GitHub Actions run 41795515713](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41795515713) passed the clean-environment checks before production migration/deployment.
 - A fresh read-only preflight confirmed three existing pixels, seven events, two notifications, no events/notifications older than 90 days, capture on and email/repeat alerts off. This verified that the old scheduler could not age-purge any existing activity during the brief migration-first deployment window. Older versions remain unsuitable for rollback because their cleanup behavior differs.
-- Applied remote `0004_permanent_loaded_history.sql` successfully to the dedicated Maildesk database. Deployed dashboard version `bda63546-78f6-4bc1-a136-d5b7f49843d7` on the existing custom domain with the existing minute schedule. The public image Worker code/version was unchanged; the additive database trigger marks new recorded loads permanently.
+- Applied remote `0004_permanent_loaded_history.sql` successfully to the dedicated Maildesk database. Deployed dashboard version `[internal identifier recorded privately]` on the existing custom domain with the existing minute schedule. The public image Worker code/version was unchanged; the additive database trigger marks new recorded loads permanently.
 - The authenticated live preferences showed capture still on, the new global keep-all preference off, and no activity-age dropdown. Created “Retention policy verification” in the owner interface, saved its per-pixel keep flag while still never-loaded, reloaded and confirmed protection persisted.
 - One controlled public GET returned HTTP 200 and the unchanged 42-byte GIF. Reloading the private record showed “Kept permanently after its first recorded load” and one history entry. No email was sent. Archived the controlled record to stop further recording without deleting it.
 - Read-only production checks confirmed all four current pixels marked as loaded/permanent, eight total events (all seven original events preserved), three metadata-bearing events, and two notifications unchanged. The controlled record was archived with both its recorded-load and preservation flags true. The new trigger and cleanup indexes existed.
@@ -101,9 +113,9 @@ The owner’s conditional approval was fulfilled and the request-details update 
 
 - Exported the existing dedicated production database to a private local file outside Git, restored it into disposable SQLite and applied the final `0003` migration. Original counts of two pixels, five events and two notifications were preserved; capture defaulted off and the pagination index existed.
 - Applied remote `0003_request_details.sql` successfully to the confirmed Maildesk database only.
-- Deployed dashboard version `784a15e9-61ac-4850-9314-7fd20578dcd0` and image Worker version `1d8f83e4-740e-4935-bf7c-30a92e00d4e3` from the reviewed source. Existing hostnames, cron, Access configuration, free plan and mail DNS were unchanged.
+- Deployed dashboard version `[internal identifier recorded privately]` and image Worker version `[internal identifier recorded privately]` from the reviewed source. Existing hostnames, cron, Access configuration, free plan and mail DNS were unchanged.
 - The existing owner session opened the live workspace. Through Settings, enabled **Collect request details** and saved successfully. A read-only database check confirmed capture on, email off, repeat alerts off and retention still 90 days.
-- Created and labeled “Request-details release verification” through the live private interface. Issued one HEAD and two controlled GET requests with deliberately supplied desktop-Chrome and iPhone-Safari User-Agents. HEAD returned 200 with zero bytes and no event. Both GETs returned 200 with the identical 42-byte GIF, SHA-256 `ef1955ae757c8b966c83248350331bd3a30f658ced11f387f8ebf05ab3368629`, and cache-prevention headers.
+- Created and labeled “Request-details release verification” through the live private interface. Issued one HEAD and two controlled GET requests with deliberately supplied desktop-Chrome and iPhone-Safari User-Agents. HEAD returned 200 with zero bytes and no event. Both GETs returned 200 with the identical 42-byte GIF, SHA-256 `[private verification value]`, and cache-prevention headers.
 - The same pixel’s live timeline showed two separate entries with timestamps, approximate request location, network and the corresponding reported client/platform/device summary. Expanding an entry showed its request IP, time zone, ASN and raw reported User-Agent. Database checks confirmed two metadata-bearing events and all five historical null-metadata events retained, with total notifications unchanged at two. No email was sent; these UAs do not establish actual Chrome/iPhone or mailbox use.
 - Archived the controlled release-verification pixel through the interface to stop recording without deleting its history. Collection remains enabled for future loads on other unarchived pixels.
 - Unauthenticated standard-user-agent checks for `/`, `/api/bootstrap`, `/api/export.csv` and the new `/assets/index-BcIiXTe0.js` each returned 302 to the correct Cloudflare Access login. No private event metadata was returned by those checks.
@@ -121,7 +133,7 @@ The reviewed source baseline is published in the owner’s public [Solure-Mailde
 | Current local recheck | TypeScript, client build and both Worker dry-run bundles passed |
 | Current local backend tests | Unverified: Miniflare/D1 initialization timed out before the 24 tests executed; this local `pnpm check` did not pass |
 | Cloudflare Access setup | Zero Trust Free active; dashboard application created for `maildesk.soluredigitalworks.com`, with an exact-email Allow rule for `elijah@soluredigitalworks.com` and email one-time PIN enabled |
-| Access team | `throbbing-morning-dbde.cloudflareaccess.com`; production configuration uses the actual application audience, with no `DEV_AUTH`, `EMAIL_MODE` or email binding |
+| Access team | `[owner Access team hostname]`; production configuration uses the actual application audience, with no `DEV_AUTH`, `EMAIL_MODE` or email binding |
 | Production configuration bundles | Both dry-run bundles passed with the actual account, D1 and Access identifiers |
 | Optional native email alerts | Unconfigured. The account’s Email Sending onboarding UI required Workers Paid; no paid upgrade was accepted |
 
@@ -133,10 +145,10 @@ Root Email Routing onboarding proposed replacing the domain’s Microsoft MX rec
 
 | Resource | Observed result |
 | --- | --- |
-| Cloudflare account | `2b6c3404db3df23a12558f1852bc221c` |
-| Dedicated D1 database | `solure-maildesk`, ID `1e984554-9e0c-455c-91be-aefaae407324`, created empty; remote migrations `0001_initial.sql` and `0002_daily_counters.sql` both applied successfully |
-| Dashboard Worker | Deployed version `47f1c3fa-b218-4a88-ba94-3340a3769fb9`, custom domain `maildesk.soluredigitalworks.com`, with a once-per-minute scheduled trigger |
-| Public image Worker | Deployed version `613db136-48a2-4c60-8d4a-bb744221cfbc`, custom domain `pixel.soluredigitalworks.com` |
+| Cloudflare account | `[internal identifier recorded privately]` |
+| Dedicated D1 database | `solure-maildesk`, ID `[internal identifier recorded privately]`, created empty; remote migrations `0001_initial.sql` and `0002_daily_counters.sql` both applied successfully |
+| Dashboard Worker | Deployed version `[internal identifier recorded privately]`, custom domain `maildesk.soluredigitalworks.com`, with a once-per-minute scheduled trigger |
+| Public image Worker | Deployed version `[internal identifier recorded privately]`, custom domain `pixel.soluredigitalworks.com` |
 | Unknown valid-format image URL | With a standard Mozilla user agent, GET returned HTTP 200 and a 42-byte, 1×1 transparent GIF with cache-prevention headers; HEAD returned HTTP 200 with an empty body |
 | Invalid public image path | HTTP 404 with the same standard user agent |
 | Unauthenticated private paths | `/`, `/api/bootstrap`, `/api/export.csv` and `/assets/index-BFM4bS7d.js` each returned HTTP 302 to the exact Cloudflare Access login with a standard Mozilla user agent |
