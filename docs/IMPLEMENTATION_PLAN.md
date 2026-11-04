@@ -1,5 +1,17 @@
 # Solure Maildesk implementation plan
 
+## Outreach opt-out — November 4, 2026
+
+The owner approved a professional “Stop outreach emails” footer and explicitly required that random visitors cannot opt out by merely loading a page. Keep a public, script-free confirmation form on the existing image Worker, with separate 256-bit bearer tokens bound immutably to a normalized saved recipient. GET and HEAD are read-only; an explicit same-origin, bounded form POST records the preference. No public email input, sign-in requirement, recipient display, request-detail capture or automatic submission is provided. A forwarded bearer link can confirm the original recipient; do not present it as identity verification.
+
+Add independent link and do-not-contact tables in migration `0007_outreach_opt_out.sql`, without a cascading pixel foreign key. Preserve every original table/row, the permanent-history and 89-day report guards, and existing image behavior. Retain links and suppression entries even after a pixel’s recipient changes or the pixel is cleared/deleted. The owner API creates a link only for a valid current recipient, refuses suppressed recipients, and checks concurrent edits. Expose matching suppression flags and a private, paged/searchable manual-entry list for reply-based requests. Block new tracking starts for suppressed addresses and prevent copying from a stale or blocked recipient in the interface.
+
+The signature footer is optional, explicitly created for a saved recipient, readable without images, and present in rich HTML and plain-text fallback. Copying remains separate from tracking activation. Clearly state that manual messages in Outlook are outside Maildesk’s control and that reply-based opt-outs must be recorded by the owner. No arbitrary email sender, external list service, dependency upgrade, paid plan, DNS or access change is required.
+
+Rehearse the additive migration against a private production export and compare original rows/columns before release. Check public GET/HEAD/preview no-write behavior, explicit POST, invalid tokens/methods/origins, repeated confirmation, edit/delete survival, duplicate/manual suppression, exact-owner private APIs, current tracking/retention/report regressions, and responsive rendered controls. The live policy and source check must support any owner-only claim. Recovery retains the new tables, old sent links and suppression checks; older code that ignores opt-outs is not a suitable routine rollback. A database restore replaces newer data and requires separate approval.
+
+Status: local implementation, 114 tests, TypeScript, build, both bundles, populated-data rehearsal and rendered desktop/narrow-screen review passed. Publication, CI, migration, deployment and live evidence remain separate pending steps.
+
 Status: approved scope for local implementation; production deployment, DNS, live email sending and tenant changes remain separate release steps. November 2, 2026.
 
 ## Tracking and notification activation correction — November 4, 2026

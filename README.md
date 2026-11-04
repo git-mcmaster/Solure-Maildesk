@@ -36,6 +36,16 @@ Create and copy a fresh signature for each email. Reusing one tracked signature 
 
 The dashboard’s preview uses a separate untracked logo, so viewing, hiding or copying it does not record a load. “Images hidden” previews the readable contact text without the logo. An email client may still block images, proxy or cache them, and a request does not prove a human read the email. The logo does not bypass those controls or establish a deliverability improvement. Outlook on iPhone’s handling of the copied signature and external image must be tested before treating that client as supported.
 
+## Outreach opt-out
+
+For a saved recipient, choose “Create opt-out footer” in the selected message. The optional signature footer provides a recipient-specific “Stop outreach emails” link and a reply-based opt-out instruction. Generating or copying the footer does not start tracking. Save a changed recipient before generating or copying another recipient’s footer.
+
+The public link opens a confirmation page on the existing public image hostname. Ordinary GET/HEAD visits, scanner previews and image loads cannot add an address to the do-not-contact list. Only submitting its same-origin confirmation form does that. The page exposes no recipient address or private Maildesk information and collects no request IP, location or User-Agent. A forwarded link remains bound to the original recipient; anyone holding it can confirm that recipient’s preference. It is not proof of who clicked.
+
+Confirmed preferences and recipient-bound links survive message edits, history clearing, manual pixel deletion and automatic cleanup. Existing tracking history and image-load behavior remain unchanged. The private “Do not contact” view supports search and manual entry for reply-based requests. Matching messages show a prominent warning; Maildesk blocks new tracking starts, new opt-out links and its copy controls for that address. Maildesk does not read the inbox or send prospecting messages, so the owner must record reply-based requests and honor the list when composing directly in Outlook or another app. Existing copied text cannot be recalled. The opt-out footer does not supply the separate postal-address or advertising disclosures required for commercial email.
+
+The dashboard remains restricted to the configured owner, with both Cloudflare Access and application-level exact-email checks. Only the public image and opt-out routes are accessible without dashboard sign-in. This extension uses existing services and adds no plan, sender destination, DNS or Access-policy change.
+
 ## Local development
 
 Use Node 22.21 or a supported Node 24+ release and pnpm 10.26.1. Install the pinned dependency graph:

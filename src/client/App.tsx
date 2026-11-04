@@ -18,7 +18,7 @@ import type {
   RequestMetadata,
   Settings,
 } from "../server/types";
-import { emailContent, imageAddresses, type EmailImageFormat } from "./signature";
+import { emailContent, imageAddresses, optOutContent, type EmailImageFormat } from "./signature";
 
 type IconName =
   | "grid"
@@ -40,6 +40,8 @@ type IconName =
   | "report"
   | "refresh";
 type PixelPage = { items: Pixel[]; total: number; hasMore: boolean };
+type ContactPreference = { recipient: string; createdAt: string; source: "recipient" | "owner" };
+type ContactPreferencePage = { items: ContactPreference[]; total: number; offset: number; hasMore: boolean };
 const paths: Record<IconName, string> = {
   grid: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
   activity: "M3 12h4l3-8 4 16 3-8h4",
@@ -355,7 +357,7 @@ export default function App() {
   const [listError, setListError] = useState("");
   const listRequestId = useRef(0);
   const [dialog, setDialog] = useState<
-    "settings" | "notifications" | "reports" | "guide" | "delete" | "clear" | null
+    "settings" | "notifications" | "reports" | "guide" | "contacts" | "delete" | "clear" | null
   >(null);
   const [draft, setDraft] = useState({ label: "", recipient: "", notes: "" });
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(null);
@@ -386,6 +388,16 @@ export default function App() {
   const [copyNotice, setCopyNotice] = useState("");
   const [emailFormat, setEmailFormat] = useState<EmailImageFormat>("signature");
   const [previewImages, setPreviewImages] = useState(true);
+  const [includeOptOut, setIncludeOptOut] = useState(true);
+  const [contactSearch, setContactSearch] = useState("");
+  const [contactRecipient, setContactRecipient] = useState("");
+  const [contacts, setContacts] = useState<ContactPreference[]>([]);
+  const [contactsTotal, setContactsTotal] = useState(0);
+  const [contactsHasMore, setContactsHasMore] = useState(false);
+  const [contactsNextOffset, setContactsNextOffset] = useState(0);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactsError, setContactsError] = useState("");
+  const contactsRequestId = useRef(0);
   const detailRef = useRef<HTMLElement>(null);
   const deepLinkOpened = useRef(false);
   const selected = selectedRecord;
@@ -627,6 +639,29 @@ export default function App() {
     };
   }, [dialog, loadReports]);
 
+  const loadContacts = useCallback(async (offset = 0) => {
+    const requestId = ++contactsRequestId.current;
+    setContactsLoading(true);
+    try {
+      const page = await request<ContactPreferencePage>(`/api/do-not-contact?${new URLSearchParams({ q: contactSearch, offset: String(offset), limit: "100" })}`);
+      if (requestId !== contactsRequestId.current) return;
+      setContacts((current) => offset ? [...current, ...page.items.filter((item) => !current.some((entry) => entry.recipient === item.recipient))] : page.items);
+      setContactsTotal(page.total);
+      setContactsHasMore(page.hasMore);
+      setContactsNextOffset(page.offset + page.items.length);
+      setContactsError("");
+    } catch (err) {
+      if (requestId === contactsRequestId.current) setContactsError((err as Error).message);
+    } finally {
+      if (requestId === contactsRequestId.current) setContactsLoading(false);
+    }
+  }, [contactSearch]);
+  useEffect(() => {
+    if (dialog !== "contacts") return;
+    const timer = window.setTimeout(() => void loadContacts(), 250);
+    return () => { window.clearTimeout(timer); contactsRequestId.current += 1; };
+  }, [dialog, loadContacts]);
+
   async function action(key: string, task: () => Promise<void>) {
     if (busy) return;
     setBusy(key);
@@ -652,6 +687,7 @@ export default function App() {
     setPixelReportLoading(true);
     selectedIdRef.current = pixel.id;
     setCopyNotice("");
+    setIncludeOptOut(true);
   }
   async function createPixel() {
     await action("create", async () => {
@@ -709,9 +745,41 @@ export default function App() {
       );
     });
   }
+  async function createOptOutLink() {
+    if (!selected || selected.doNotContact || draft.recipient !== selected.recipient) return;
+    const id = selected.id;
+    await action("opt-out", async () => {
+      await request<{ url: string; recipient: string }>(`/api/pixels/${id}/opt-out-link`, { method: "POST", body: "{}" });
+      const pixel = await request<Pixel>(`/api/pixels/${id}`);
+      if (selectedIdRef.current === id) { setSelectedRecord(pixel); setIncludeOptOut(true); }
+      setToast("Opt-out footer ready. Creating it does not stop outreach or start tracking.");
+    });
+  }
+  async function copyOptOutFooter() {
+    if (!selected?.optOutUrl || copyBlocked) return;
+    const content = optOutContent(selected.optOutUrl, selected.pixelUrl);
+    try {
+      if ("ClipboardItem" in window && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([content.html], { type: "text/html" }), "text/plain": new Blob([content.plainText], { type: "text/plain" }) })]);
+      } else await navigator.clipboard.writeText(content.plainText);
+      setCopyNotice("Opt-out footer copied for the saved recipient. Tracking and contact preferences are unchanged.");
+    } catch { setCopyNotice("Clipboard access is unavailable. Copy the footer link from the field below."); }
+  }
+  async function addDoNotContact(event: FormEvent) {
+    event.preventDefault();
+    await action("contact-add", async () => {
+      setContactsError("");
+      try {
+        await request<ContactPreference>("/api/do-not-contact", { method: "POST", body: JSON.stringify({ recipient: contactRecipient }) });
+        setContactRecipient("");
+        await Promise.all([loadContacts(), load(), loadList()]);
+        setToast("Address added to do not contact. Maildesk flags it; Outlook sends remain under your control.");
+      } catch (err) { setContactsError((err as Error).message); }
+    });
+  }
   async function copyPixel(rich: boolean) {
-    if (!selected || !data) return;
-    const { html, plainText } = emailContent(selected.pixelUrl, data.ownerEmail, emailFormat);
+    if (!selected || !data || copyBlocked) return;
+    const { html, plainText } = emailContent(selected.pixelUrl, data.ownerEmail, emailFormat, includeOptOut ? selected.optOutUrl : null);
     const trackingNotice = selected.status === "armed"
       ? "Tracking is active. Composer previews or scanners may be the first recorded load. "
       : "Tracking stays off while you prepare. Start when ready to send. ";
@@ -741,9 +809,9 @@ export default function App() {
     }
   }
   async function copyTextSignature() {
-    if (!selected || !data) return;
+    if (!selected || !data || copyBlocked) return;
     try {
-      await navigator.clipboard.writeText(emailContent(selected.pixelUrl, data.ownerEmail, "signature").plainText);
+      await navigator.clipboard.writeText(emailContent(selected.pixelUrl, data.ownerEmail, "signature", includeOptOut ? selected.optOutUrl : null).plainText);
       setCopyNotice("Contact text copied. This version has no image and does not record loads.");
     } catch {
       setCopyNotice("Clipboard access is unavailable. You can select and copy the contact text in the preview.");
@@ -805,6 +873,9 @@ export default function App() {
     (draft.label !== selected.label ||
       draft.recipient !== selected.recipient ||
       draft.notes !== selected.notes);
+  const recipientUnsaved = !!selected && draft.recipient !== selected.recipient;
+  const copyBlocked = !!selected?.doNotContact || recipientUnsaved;
+  const validSavedRecipient = !!selected?.recipient && /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(selected.recipient);
   const unread = data?.stats.unread || 0;
 
   if (loading)
@@ -872,6 +943,9 @@ export default function App() {
             {unread > 0 && (
               <span className="nav-count unread-count">{unread}</span>
             )}
+          </button>
+          <button className="nav-link" onClick={() => setDialog("contacts")} aria-label="Do not contact" aria-haspopup="dialog">
+            <Icon name="shield" /> Do not contact
           </button>
           <button className="nav-link" onClick={() => openReports()} aria-haspopup="dialog">
             <Icon name="report" /> Reports
@@ -1079,6 +1153,7 @@ export default function App() {
                           <small>
                             {pixel.recipient || "Add a recipient or a note"}
                           </small>
+                          {pixel.doNotContact && <span className="contact-blocked-badge">Do not contact</span>}
                         </span>
                       </span>
                       <span className={`status status-${pixel.status}`}>
@@ -1183,6 +1258,13 @@ export default function App() {
                     <span />
                     {statusNames[selected.status]}
                   </div>
+                  {selected.doNotContact && (
+                    <div className="contact-blocked-warning" role="status">
+                      <strong><Icon name="shield" size={17} /> Do not contact this address</strong>
+                      <p>This recipient has opted out of sales emails. New tracking sessions and copy tools are blocked. Existing tracking and history are unchanged. Maildesk cannot prevent you sending manually in Outlook.</p>
+                      <button className="text-button" onClick={() => setDialog("contacts")}>View do-not-contact list</button>
+                    </div>
+                  )}
                   <section className="tracking-control" data-active={selected.status === "armed"} aria-label="Tracking control">
                     <div className="tracking-control-heading">
                       <Icon name={selected.status === "armed" ? "activity" : "pause"} size={18} />
@@ -1206,7 +1288,7 @@ export default function App() {
                           <button
                             className="button primary full-width"
                             onClick={() => void updatePixel("armed", true)}
-                            disabled={!!busy || offline || !data.notificationConfigured}
+                            disabled={!!busy || offline || !data.notificationConfigured || selected.doNotContact}
                           >
                             <Icon name="activity" size={17} />
                             {busy === "armed" ? "Starting…" : selected.status === "armed" ? "Resume email alerts" : "Start tracking & email me"}
@@ -1300,21 +1382,47 @@ export default function App() {
                       signature. Use this or the logo signature, not both.
                     </p>
                   )}
+                  <section className="outreach-footer" aria-label="Outreach opt-out footer">
+                    <h3>Outreach opt-out</h3>
+                    {selected.doNotContact ? (
+                      <p>This recipient is on your do-not-contact list. No new outreach footer can be created.</p>
+                    ) : recipientUnsaved ? (
+                      <p className="outreach-save-note">Save the changed recipient below before copying. Existing links still belong to their original recipient.</p>
+                    ) : !validSavedRecipient ? (
+                      <p>Add and save one recipient below to create their opt-out footer.</p>
+                    ) : selected.optOutUrl ? (
+                      <>
+                        <p>For <strong>{selected.recipient}</strong></p>
+                        <label className="outreach-include"><input type="checkbox" checked={includeOptOut} onChange={(event) => setIncludeOptOut(event.target.checked)} /> Include footer when copying</label>
+                        <div className="outreach-footer-preview">To stop receiving sales emails from Solure, <span>Stop outreach emails</span> or reply “opt out”.</div>
+                        <button className="text-button" onClick={() => void copyOptOutFooter()} disabled={!!busy || offline}><Icon name="copy" size={15} /> Copy footer only</button>
+                        <details className="outreach-link-details"><summary>View recipient’s opt-out link</summary><input aria-label="Recipient’s outreach opt-out link" readOnly value={selected.optOutUrl} onFocus={(event) => event.target.select()} /></details>
+                      </>
+                    ) : (
+                      <>
+                        <p>Create a footer for <strong>{selected.recipient}</strong>. It works even when images are blocked.</p>
+                        <button className="button secondary full-width" onClick={() => void createOptOutLink()} disabled={!!busy || offline}>{busy === "opt-out" ? "Creating footer…" : "Create opt-out footer"}</button>
+                      </>
+                    )}
+                    <p className="outreach-footer-note">Visiting the link only opens a confirmation page. The recipient must press “Stop outreach emails” to opt out. Links stay bound to their original address, even if this record changes or is deleted.</p>
+                  </section>
                   <div className="copy-actions">
                     <button
                       className="button secondary"
                       onClick={() => void copyPixel(true)}
+                      disabled={copyBlocked}
                     >
                       <Icon name="copy" size={16} /> Copy for Outlook
                     </button>
                     <button
                       className="text-button"
                       onClick={() => void copyPixel(false)}
+                      disabled={copyBlocked}
                     >
                       Copy HTML
                     </button>
                     {emailFormat === "signature" && (
-                      <button className="text-button" onClick={() => void copyTextSignature()}>Copy text only</button>
+                      <button className="text-button" disabled={copyBlocked} onClick={() => void copyTextSignature()}>Copy text only</button>
                     )}
                   </div>
                   <details className="html-details">
@@ -1322,7 +1430,7 @@ export default function App() {
                     <textarea
                       readOnly
                       aria-label={emailFormat === "signature" ? "Tracked signature HTML" : "Tracking image HTML"}
-                      value={emailContent(selected.pixelUrl, data.ownerEmail, emailFormat).html}
+                      value={copyBlocked ? "Copying is unavailable. Check the saved recipient and do-not-contact status." : emailContent(selected.pixelUrl, data.ownerEmail, emailFormat, includeOptOut ? selected.optOutUrl : null).html}
                       onFocus={(event) => event.target.select()}
                       rows={4}
                       spellCheck={false}
@@ -1647,6 +1755,28 @@ export default function App() {
           {toast}
         </div>
       )}
+      {dialog === "contacts" && (
+        <Dialog title="Do not contact" onClose={() => setDialog(null)} wide>
+          <div className="dialog-body contacts-body">
+            <p>Addresses that must not receive further sales outreach from Solure. Confirmed web opt-outs are saved here; refresh to check for new requests. Add reply-based requests below.</p>
+            <p className="contacts-limit-note">Maildesk blocks new tracking and copy tools for matching saved recipients. It cannot block Outlook’s Send button. Check this list before sending manually. Entries are kept independently of message history and cleanup.</p>
+            <form className="contact-add-form" onSubmit={(event) => void addDoNotContact(event)}>
+              <label>Record a do-not-contact request<input type="email" required maxLength={254} value={contactRecipient} onChange={(event) => setContactRecipient(event.target.value)} placeholder="name@example.com" /></label>
+              <button className="button secondary" type="submit" disabled={!!busy || offline}>{busy === "contact-add" ? "Adding…" : "Add address"}</button>
+            </form>
+            <div className="contacts-search-row"><label className="search contacts-search"><Icon name="search" size={16} /><input aria-label="Search do-not-contact addresses" maxLength={200} value={contactSearch} onChange={(event) => setContactSearch(event.target.value)} placeholder="Search addresses" /></label><button className="icon-button" aria-label="Refresh do-not-contact list" onClick={() => void loadContacts()} disabled={contactsLoading || offline}><Icon name="refresh" size={17} /></button></div>
+            {contactsError && <p className="field-error" role="alert">{contactsError}</p>}
+            {contactsLoading && <p className="quiet-note" role="status">Loading addresses…</p>}
+            {!contactsLoading && !contactsError && contacts.length === 0 && <p className="contacts-empty">{contactSearch ? "No matching addresses." : "No do-not-contact requests recorded yet."}</p>}
+            <ul className="contact-preference-list">
+              {contacts.map((entry) => <li key={entry.recipient}><strong>{entry.recipient}</strong><span>{entry.source === "recipient" ? "Confirmed through opt-out link" : "Recorded by you"} · <time dateTime={entry.createdAt}>{formatDate(entry.createdAt, true)}</time></span></li>)}
+            </ul>
+            {contactsHasMore && <button className="button secondary" disabled={contactsLoading || offline} onClick={() => void loadContacts(contactsNextOffset)}>Load more addresses</button>}
+            <p className="quiet-note">{contacts.length} of {contactsTotal} {contactsTotal === 1 ? "address" : "addresses"}</p>
+          </div>
+          <div className="dialog-footer"><button className="button primary" onClick={() => setDialog(null)}>Done</button></div>
+        </Dialog>
+      )}
       {dialog === "guide" && (
         <Dialog
           title="A useful signal, with clear limits."
@@ -1659,6 +1789,9 @@ export default function App() {
               event. Your message label,
               recipient and notes stay in your private workspace.
             </p>
+            <h3>Outreach preferences</h3>
+            <p>Save the message’s recipient, then create its opt-out footer. Copying a footer does not opt anyone out or start tracking. The recipient must confirm on the public page; simply viewing the link has no effect. Old links keep their original recipient even after editing or deleting the message.</p>
+            <p>Confirmed requests and addresses you add manually remain on the separate do-not-contact list. Maildesk blocks new tracking and copy tools for those addresses, but cannot stop a message sent directly in Outlook. This preference stops future sales outreach; it does not delete historical image activity.</p>
             <h3>Test your Outlook insertion method first</h3>
             <ol>
               <li>

@@ -22,6 +22,8 @@ export interface Pixel {
   preserveUnloaded: boolean;
   pixelUrl: string;
   notificationStatus: DeliveryStatus | 'none';
+  doNotContact: boolean;
+  optOutUrl: string | null;
 }
 
 export interface LoadEvent {
@@ -95,6 +97,24 @@ export interface ReportPage {
   hasMore: boolean;
 }
 
+export interface DoNotContactEntry {
+  recipient: string;
+  createdAt: string;
+  source: 'recipient' | 'owner';
+}
+
+export interface DoNotContactPage {
+  items: DoNotContactEntry[];
+  total: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+export interface OptOutLink {
+  url: string;
+  recipient: string;
+}
+
 export interface Settings {
   emailEnabled: boolean;
   /** Legacy compatibility value; automatic loaded-history expiry is disabled. */
@@ -150,4 +170,6 @@ export interface PixelRow {
   has_recorded_load: number;
   preserve_unloaded: number;
   notification_status?: DeliveryStatus | null;
+  do_not_contact?: number;
+  opt_out_token?: string | null;
 }

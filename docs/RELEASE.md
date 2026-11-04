@@ -1,5 +1,15 @@
 # Release runbook
 
+## Outreach opt-out release — November 4, 2026
+
+Approved scope is the recipient-confirmed outreach preference flow, permanent do-not-contact list and signature integration. The public route belongs only to the existing image Worker; do not bypass or widen the private dashboard Access policy. Live policy inspection on November 4 confirmed one Allow policy with exactly `elijah@soluredigitalworks.com`, hostname-wide coverage and no other application policy. Application code additionally validates the RS256 JWT signature, issuer, audience, expiry and exact configured owner email. A live second-account denial is not claimed.
+
+Before rollout: publish the reviewed exact tree, require complete CI and both Worker bundles, export the confirmed production database privately, rehearse `0007` in a disposable copy and compare all existing row/column values. The migration creates only independent opt-out-link and suppression tables. Apply it before deploying either updated Worker; existing code can read the additive schema. Deploy the public confirmation route before the dashboard produces links, then verify unauthenticated dashboard denial, public root/API denial, GET/HEAD no mutation, explicit confirmation, immutable link binding and private list visibility with synthetic addresses only. Do not generate or confirm real customers’ preferences for testing.
+
+Recovery uses a corrected build retaining sent link URLs, suppression entries and guards as well as activation/permanent-history/report behavior. Reverting code alone does not erase preferences, but older code can ignore them or break sent links. Do not drop the new tables or replace production data as a routine rollback. No new paid service, DNS, identity provider, Access permission or sender destination is authorized or needed.
+
+Status: local implementation and verification passed, including the real browser form and 320/390-pixel layouts. See the 114-test and populated-data rehearsal evidence in VERIFICATION.md. Publication, CI, remote migration and deployment remain pending at this checkpoint.
+
 This runbook separates confirmed setup from remaining release checks. The owner authorized implementation and deployment; completion still requires the evidence below. Keep the current Microsoft MX, SPF, DKIM, DMARC and public MTA-STS service intact.
 
 ## Tracking activation correction — November 4, 2026

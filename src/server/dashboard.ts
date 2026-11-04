@@ -4,6 +4,7 @@ import { errorResponse, HttpError, json, onlyFields, readJson, securityHeaders, 
 import { cancelInactiveNotifications, dispatchNotifications, enforceRetention } from './notifications';
 import { parseRequestMetadata } from './request-metadata';
 import { dispatchPixelReports, getPixelReport, listReports, queuePixelReports } from './reports';
+import { addDoNotContact, getOrCreateOptOutLink, isDoNotContact, listDoNotContact } from './opt-out';
 import type { Bootstrap, Env, LoadEvent, LoadEventPage, PixelStatus } from './types';
 
 const statuses = new Set<PixelStatus>(['draft', 'armed', 'paused', 'archived']);
@@ -113,6 +114,22 @@ async function api(request: Request, env: Env): Promise<Response> {
     if (!created.meta.changes) throw new HttpError(409, 'PIXEL_LIMIT', 'This version supports 50,000 saved pixels. Export and delete older records to make room.');
     return json(await getPixel(env, id), 201);
   }
+  if (path === '/api/do-not-contact') {
+    if (method === 'GET') return json(await listDoNotContact(env, url.searchParams));
+    if (method === 'POST') {
+      const body = await readJson(request);
+      onlyFields(body, ['recipient']);
+      return json(await addDoNotContact(env, body.recipient), 201);
+    }
+    throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'This action is not supported.');
+  }
+  const optOut = /^\/api\/pixels\/([^/]+)\/opt-out-link$/u.exec(path);
+  if (optOut) {
+    const pixel = await requirePixel(env, optOut[1]!);
+    if (method !== 'POST') throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Create the link from your dashboard.');
+    onlyFields(await readJson(request), []);
+    return json(await getOrCreateOptOutLink(env, pixel.id, pixel.recipient));
+  }
   const match = /^\/api\/pixels\/([^/]+)(\/(?:events|report))?$/u.exec(path);
   if (match) {
     const id = match[1]!;
@@ -147,6 +164,11 @@ async function api(request: Request, env: Env): Promise<Response> {
         if (body.status !== undefined && !statuses.has(body.status as PixelStatus)) throw new HttpError(400, 'INVALID_STATUS', 'Choose a valid pixel status.');
         if (body.enableEmailAlerts !== undefined && (body.enableEmailAlerts !== true || body.status !== 'armed')) throw new HttpError(400, 'INVALID_FIELD', 'Start tracking to enable email alerts.');
         if (body.enableEmailAlerts === true && !notificationConfigured(env)) throw new HttpError(409, 'NOTIFICATION_NOT_CONFIGURED', 'Configure notification sending before starting email alerts.');
+        const recipient = body.recipient === undefined ? null : recipientField(body.recipient);
+        const guardRecipient = body.status === 'armed' || recipient !== null;
+        if (guardRecipient && (body.status ?? pixel.status) === 'armed' && await isDoNotContact(env, recipient ?? pixel.recipient)) {
+          throw new HttpError(409, 'DO_NOT_CONTACT', 'This address has opted out. Do not send further sales emails.');
+        }
         const now = new Date().toISOString();
         const status = body.status ?? null;
         const edits: D1PreparedStatement[] = [];
@@ -155,7 +177,8 @@ async function api(request: Request, env: Env): Promise<Response> {
           // for every tracking message. Disabled historical alerts stay disabled.
           edits.push(env.DB.prepare(`UPDATE pixels SET activation_id=lower(hex(randomblob(16))),activation_alert_at=NULL,armed_at=?,updated_at=?
             WHERE status='armed' AND EXISTS (SELECT 1 FROM settings WHERE id=1 AND email_enabled=0)
-              AND EXISTS (SELECT 1 FROM pixels target WHERE target.id=?)`).bind(now, now, id));
+              AND EXISTS (SELECT 1 FROM pixels target WHERE target.id=?
+                AND NOT EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(COALESCE(?,target.recipient)))) )`).bind(now, now, id, recipient));
         }
         // Every omitted value is preserved by the write itself. A stale label
         // save cannot undo a concurrent Start/Pause or restore old notes.
@@ -163,16 +186,24 @@ async function api(request: Request, env: Env): Promise<Response> {
           activation_id=CASE WHEN ?='armed' AND (status!='armed' OR activation_id IS NULL) THEN ? ELSE activation_id END,
           activation_alert_at=CASE WHEN ?='armed' AND (status!='armed' OR activation_id IS NULL) THEN NULL ELSE activation_alert_at END,
           armed_at=CASE WHEN ?='armed' AND (status!='armed' OR activation_id IS NULL) THEN ? ELSE armed_at END,
-          status=COALESCE(?,status),preserve_unloaded=COALESCE(?,preserve_unloaded),updated_at=? WHERE id=?`)
+          status=COALESCE(?,status),preserve_unloaded=COALESCE(?,preserve_unloaded),updated_at=? WHERE id=?
+          AND (?=0 OR COALESCE(?,status)!='armed' OR NOT EXISTS
+            (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(COALESCE(?,pixels.recipient)))))`)
           .bind(body.label === undefined ? null : stringField(body.label, 'Label', 150) || 'Unlabeled pixel',
-            body.recipient === undefined ? null : recipientField(body.recipient), body.notes === undefined ? null : stringField(body.notes, 'Notes', 2000),
+            recipient, body.notes === undefined ? null : stringField(body.notes, 'Notes', 2000),
             status, crypto.randomUUID(), status, status, now, status,
-            body.preserveUnloaded === undefined ? null : Number(body.preserveUnloaded), now, id));
-        if (body.enableEmailAlerts === true) edits.push(env.DB.prepare("UPDATE settings SET email_enabled=1 WHERE id=1 AND EXISTS (SELECT 1 FROM pixels WHERE id=? AND status='armed')").bind(id));
+            body.preserveUnloaded === undefined ? null : Number(body.preserveUnloaded), now, id, Number(guardRecipient), status, recipient));
+        if (body.enableEmailAlerts === true) edits.push(env.DB.prepare(`UPDATE settings SET email_enabled=1 WHERE id=1
+          AND EXISTS (SELECT 1 FROM pixels p WHERE p.id=? AND p.status='armed'
+            AND (? IS NULL OR p.recipient=?)
+            AND NOT EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(p.recipient))))`).bind(id, recipient, recipient));
         edits.push(env.DB.prepare(cancelInactiveNotifications));
         await env.DB.batch(edits);
         const saved = await getPixel(env, id);
         if (!saved) throw new HttpError(404, 'NOT_FOUND', 'This pixel could not be found.');
+        if (guardRecipient && (body.status ?? pixel.status) === 'armed' && await isDoNotContact(env, recipient ?? pixel.recipient)) {
+          throw new HttpError(409, 'DO_NOT_CONTACT', 'This address has opted out. Do not send further sales emails.');
+        }
         return json(saved);
       }
     }
@@ -242,11 +273,11 @@ async function api(request: Request, env: Env): Promise<Response> {
     const stream = new ReadableStream<Uint8Array>({ async pull(controller) {
       try {
         if (!headerSent) {
-          controller.enqueue(encoder.encode(['Message', 'Recipient', 'Status', 'Created', 'First image load', 'Latest image load', 'Image requests', 'Before arming', 'Notes'].map(csvCell).join(',') + '\r\n'));
+          controller.enqueue(encoder.encode(['Message', 'Recipient', 'Status', 'Created', 'First image load', 'Latest image load', 'Image requests', 'Before arming', 'Notes', 'Do not contact'].map(csvCell).join(',') + '\r\n'));
           headerSent = true;
         }
         const page = await listPixels(env, { offset, limit: 100 });
-        for (const p of page.items) controller.enqueue(encoder.encode([p.label, p.recipient, p.status, p.createdAt, p.firstLoadedAt, p.lastLoadedAt, p.loadCount, p.earlyLoadCount, p.notes].map(csvCell).join(',') + '\r\n'));
+        for (const p of page.items) controller.enqueue(encoder.encode([p.label, p.recipient, p.status, p.createdAt, p.firstLoadedAt, p.lastLoadedAt, p.loadCount, p.earlyLoadCount, p.notes, p.doNotContact ? 'Yes' : 'No'].map(csvCell).join(',') + '\r\n'));
         offset += page.items.length;
         if (!page.hasMore) controller.close();
       } catch (error) { controller.error(error); }

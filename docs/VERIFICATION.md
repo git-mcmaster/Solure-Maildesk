@@ -1,5 +1,17 @@
 # Verification record
 
+## Outreach opt-out — November 4, 2026
+
+The owner approved implementation of a recipient-specific opt-out footer and confirmation page, including protection against accidental page visits. Live Access inspection confirmed hostname-wide dashboard coverage and one Allow rule containing exactly `elijah@soluredigitalworks.com`. The source independently checks the signed Access token’s issuer, audience, expiry and exact owner email, with development bypass restricted to loopback. No access settings were changed. A live second identity’s sign-in was not exercised.
+
+Local validation passed: `node node_modules/vitest/vitest.mjs run` (114 tests in three files, including 14 opt-out server regressions and 20 signature tests), `node node_modules/typescript/bin/tsc --noEmit`, `node node_modules/vite/bin/vite.js build`, both Wrangler deployment dry runs and `git diff --check`. The installed versions were Node 24.22.1, TypeScript 7.0.2, Vite 8.3.5, Vitest 5.0.5 and Wrangler 4.156.1. No dependency versions changed. Final bundles measured 84.56 KiB dashboard and 16.55 KiB public Worker. The busy combined scheduler regression remains below the existing 50-query budget.
+
+A private production export was restored to disposable SQLite and migration `0007` applied. Every original row and column matched afterward: seven pixels, 23 events, five notifications, one report and existing settings. Both new tables were empty; foreign-key checks found no violation. Migration SHA-256: `9fa001d994d1ef49e251a4c19f114bb5fca1e3a7c02375bba9a2f17c49262c3d`. A fresh export/rehearsal will precede remote application; active production records can change between checks.
+
+Actual local browser testing created a synthetic recipient, generated the link and copied both rich HTML and plain text. A GET visit left the do-not-contact list empty and recorded zero image requests. The first real form POST exposed a browser-policy conflict: `Referrer-Policy: no-referrer` made the form origin null. Only the opt-out page was changed to `same-origin`, retaining no cross-origin referrer and strict Origin validation; null/foreign origins remain denied. Reloading the actual page and submitting the button then succeeded and displayed exactly one confirmed preference in the private list. The matching message showed disabled copy/new-start controls. Responsive review found navigation overflow after adding the new item; the final two-row narrow header measured 390/390 and 320/320 client/scroll widths with 44-pixel targets preserved. These are browser CSS-width checks, not a physical-iPhone test.
+
+Source publication, complete CI, remote migration and live verification remain separate pending steps. No prospective recipient has been contacted or opted out by these checks. Actual Outlook/iPhone pasted footer preservation and received-message source remain unverified; browser clipboard output does not establish email-client behavior.
+
 ## Tracking activation correction — November 4, 2026
 
 Published source `083c0c7c06070bda0bdaccf09969619e08e1a0e1`, tree `db7d8651478a9f7c9e79976d7389b856687a116b`, matches the reviewed local source. [CI run 41822743342](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41822743342) passed. Remote `0006` and both Workers are deployed; internal version identifiers are recorded privately. Immediately afterward, the six pixels, 20 events, three notifications, saved report and email-off/repeat-off preferences remained unchanged.

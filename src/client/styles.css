@@ -3049,3 +3049,238 @@ body {
     padding-inline: 8px;
   }
 }
+
+/* Outreach preferences remain separate from tracking and historical activity. */
+.contact-blocked-badge {
+  display: inline-block;
+  margin-top: 6px;
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: #8a3426;
+  background: #fff0eb;
+  font-size: 11px;
+  font-weight: 600;
+}
+.contact-blocked-warning {
+  margin-top: 17px;
+  border: 1px solid #e7bfb2;
+  border-radius: 6px;
+  padding: 14px;
+  background: #fff7f3;
+  color: #713b2e;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.contact-blocked-warning > strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.contact-blocked-warning p {
+  margin: 7px 0;
+}
+.outreach-footer {
+  margin: 17px 0;
+  padding: 14px;
+  border: 1px solid #dce1e5;
+  border-radius: 6px;
+  background: #f9fafb;
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.outreach-footer h3 {
+  margin: 0 0 7px;
+  font-size: 14px;
+}
+.outreach-footer p {
+  margin: 7px 0;
+}
+.outreach-footer .outreach-footer-note {
+  color: #627080;
+  font-size: 12px;
+  margin-top: 12px;
+}
+.outreach-include {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  margin: 10px 0;
+  font-weight: 500;
+}
+.outreach-include input {
+  flex: 0 0 auto;
+  margin-top: 5px;
+}
+.outreach-footer-preview {
+  padding: 11px;
+  margin: 10px 0;
+  background: white;
+  border: 1px solid #e4e8ec;
+  border-radius: 4px;
+  color: #596675;
+  font-size: 12px;
+}
+.outreach-footer-preview span {
+  text-decoration: underline;
+  color: #334b61;
+}
+.outreach-link-details {
+  margin-top: 9px;
+  font-size: 12px;
+}
+.outreach-link-details summary {
+  cursor: pointer;
+}
+.outreach-link-details input {
+  width: 100%;
+  min-width: 0;
+  margin-top: 9px;
+  padding: 9px;
+  border: 1px solid #dce1e5;
+  border-radius: 4px;
+  font: inherit;
+  color: #596675;
+}
+.outreach-save-note {
+  color: #805823;
+}
+.contacts-body > p {
+  margin: 0 0 12px;
+}
+.contacts-limit-note {
+  color: #596675;
+  font-size: 13px;
+}
+.contact-add-form {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  padding-block: 13px 20px;
+}
+.contact-add-form label {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 550;
+}
+.contact-add-form input {
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid #dce1e5;
+  border-radius: 5px;
+  padding: 10px;
+  font: inherit;
+  font-weight: 400;
+  color: #34414f;
+}
+.contact-add-form .button {
+  min-height: 44px;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+.contacts-search {
+  width: 100%;
+  margin-bottom: 13px;
+  border: 1px solid #dce1e5;
+  border-radius: 5px;
+  padding: 10px;
+}
+.contact-preference-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+.contact-preference-list li {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid #e4e8ec;
+  padding: 14px 0;
+  overflow-wrap: anywhere;
+}
+.contact-preference-list strong {
+  font-weight: 550;
+}
+.contact-preference-list span {
+  color: #596675;
+  font-size: 12px;
+}
+.contacts-empty {
+  padding-block: 15px;
+  color: #596675;
+}
+@media (max-width: 560px) {
+  .contact-add-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .contact-add-form .button {
+    width: 100%;
+  }
+}
+@media (max-width: 380px) {
+  .sidebar nav {
+    gap: 0;
+  }
+  .sidebar .nav-link {
+    padding-inline: 6px;
+  }
+}
+.contacts-search-row {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+}
+.contacts-search-row .contacts-search {
+  flex: 1;
+  min-width: 0;
+}
+.contacts-search-row .icon-button {
+  flex-shrink: 0;
+  min-height: 43px;
+}
+
+@media (max-width: 560px) {
+  .sidebar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 10px 14px 9px;
+  }
+  .sidebar > .brand {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+  }
+  .sidebar > .sidebar-bottom {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+    justify-self: end;
+  }
+  .sidebar > nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    gap: 4px;
+  }
+  .sidebar nav .nav-link {
+    justify-content: center;
+    width: 100%;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px;
+  }
+  .sidebar .sidebar-bottom .nav-link {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px;
+  }
+}

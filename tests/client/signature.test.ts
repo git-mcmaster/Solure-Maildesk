@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emailContent, imageAddresses } from '../../src/client/signature';
+import { emailContent, imageAddresses, optOutContent } from '../../src/client/signature';
 
 const first = 'https://pixel.soluredigitalworks.com/p/0123456789abcdef0123456789abcdef.gif';
 const second = 'https://pixel.soluredigitalworks.com/p/ffffffffffffffffffffffffffffffff.gif';
@@ -63,5 +63,44 @@ describe('message-specific email signatures', () => {
     expect(urls.logo).toBe('http://127.0.0.1:8788/p/0123456789abcdef0123456789abcdef/logo.png');
     expect(urls.preview).toBe('http://127.0.0.1:8788/brand/solure-logo-v1.png');
     expect(urls.pixel).toBe('http://127.0.0.1:8788/p/0123456789abcdef0123456789abcdef.gif');
+  });
+});
+
+
+describe('recipient-bound outreach opt-out footer', () => {
+  const stop = `https://pixel.soluredigitalworks.com/outreach/stop/${'a'.repeat(64)}`;
+
+  it('adds a readable text link and reply alternative to HTML and plain-text signatures', () => {
+    const content = emailContent(first, owner, 'signature', stop);
+    expect(content.html.match(/<img\b/gu)).toHaveLength(1);
+    expect(content.html).toContain(`href="${stop}"`);
+    expect(content.html).toContain('>Stop outreach emails</a>');
+    expect(content.html).toContain('or reply “opt out”');
+    expect(content.plainText).toContain(`\n\nTo stop receiving sales emails from Solure, use this link: ${stop}`);
+    expect(content.plainText).not.toContain('/p/');
+  });
+
+  it('supports a standalone footer and pixel alternative without an additional image', () => {
+    const footer = optOutContent(stop, first);
+    expect(footer.html).not.toMatch(/<img|<script|<form/gu);
+    expect(footer.plainText).toContain(stop);
+    const pixel = emailContent(first, owner, 'pixel', stop);
+    expect(pixel.html.match(/<img\b/gu)).toHaveLength(1);
+    expect(pixel.plainText).toBe(footer.plainText);
+  });
+
+  it.each([
+    'javascript:alert(1)',
+    `https://other.example/outreach/stop/${'a'.repeat(64)}`,
+    `https://user:password@pixel.soluredigitalworks.com/outreach/stop/${'a'.repeat(64)}`,
+    `https://pixel.soluredigitalworks.com/outreach/stop/${'a'.repeat(64)}?recipient=secret@example.com`,
+    `https://pixel.soluredigitalworks.com/outreach/stop/${'a'.repeat(64)}#other`,
+    `https://pixel.soluredigitalworks.com/outreach/stop/${'a'.repeat(32)}`,
+  ])('rejects unsafe or mismatched opt-out URLs: %s', (url) => {
+    expect(() => optOutContent(url, first)).toThrow();
+  });
+
+  it('uses the configured local public origin during development', () => {
+    expect(optOutContent(`http://127.0.0.1:8788/outreach/stop/${'b'.repeat(64)}`, 'http://127.0.0.1:8788/p/0123456789abcdef0123456789abcdef.gif').html).toContain('Stop outreach emails');
   });
 });

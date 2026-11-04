@@ -8,7 +8,7 @@ import { dispatchNotifications, enforceRetention } from '../../src/server/notifi
 import { fetchPixel } from '../../src/server/pixel';
 import { dispatchPixelReports, queuePixelReports } from '../../src/server/reports';
 import { imageAddresses } from '../../src/client/signature';
-import type { Bootstrap, Env, LoadEvent, LoadEventPage, Pixel, PixelPage, PixelReport, ReportPage, Settings } from '../../src/server/types';
+import type { Bootstrap, DoNotContactPage, Env, LoadEvent, LoadEventPage, OptOutLink, Pixel, PixelPage, PixelReport, ReportPage, Settings } from '../../src/server/types';
 
 let mf: Miniflare;
 let env: Env;
@@ -36,7 +36,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await env.DB.batch([
-    env.DB.prepare('DELETE FROM pixel_reports'), env.DB.prepare('DELETE FROM notifications'), env.DB.prepare('DELETE FROM events'), env.DB.prepare('DELETE FROM pixels'),
+    env.DB.prepare('DELETE FROM opt_out_links'), env.DB.prepare('DELETE FROM do_not_contact'), env.DB.prepare('DELETE FROM pixel_reports'), env.DB.prepare('DELETE FROM notifications'), env.DB.prepare('DELETE FROM events'), env.DB.prepare('DELETE FROM pixels'),
     env.DB.prepare('UPDATE settings SET email_enabled=0,repeat_alerts=0,capture_request_details=0,keep_unloaded_pixels=0,retention_days=90,event_day=NULL,event_count=0 WHERE id=1'),
   ]);
 });
@@ -1383,5 +1383,233 @@ describe('tracking activation upgrade', () => {
     // Upgrade alone cannot reissue a first alert after the owner previously cleared it.
     await DB.prepare("INSERT INTO events(id,pixel_id,created_at,phase) VALUES('after-upgrade','cleared-active',?,'after_arming')").bind('2026-11-01T02:01:00.000Z').run();
     expect(await DB.prepare("SELECT COUNT(*) count FROM notifications WHERE pixel_id='cleared-active'").first('count')).toBe(0);
+  });
+});
+
+describe('recipient-confirmed outreach opt-out', () => {
+  async function linked(recipient = 'Client+shop@Example.COM'): Promise<{ pixel: Pixel; link: OptOutLink }> {
+    const pixel = (await api<Pixel>('/api/pixels', 'POST', { label: 'Private proposal label', recipient, notes: 'Private owner notes' })).data;
+    const response = await api<OptOutLink>(`/api/pixels/${pixel.id}/opt-out-link`, 'POST', {});
+    expect(response.response.status).toBe(200);
+    return { pixel, link: response.data };
+  }
+  function confirm(url: string, options: { origin?: string | null; body?: string; contentType?: string; site?: string; method?: string } = {}) {
+    const headers: Record<string, string> = { 'Content-Type': options.contentType ?? 'application/x-www-form-urlencoded', 'Sec-Fetch-Site': options.site ?? 'same-origin' };
+    if (options.origin !== null) headers.Origin = options.origin ?? new URL(url).origin;
+    return fetchPixel(new Request(url, { method: options.method ?? 'POST', headers, body: options.body ?? 'confirm=stop' }), env);
+  }
+  async function counts() {
+    return env.DB.prepare(`SELECT (SELECT COUNT(*) FROM pixels) pixels,(SELECT COUNT(*) FROM events) events,
+      (SELECT COUNT(*) FROM notifications) notifications,(SELECT COUNT(*) FROM pixel_reports) reports,
+      (SELECT COUNT(*) FROM opt_out_links) links,(SELECT COUNT(*) FROM do_not_contact) blocked`).first();
+  }
+
+  it('uses a separate 256-bit link and reuses it for the saved normalized recipient', async () => {
+    const { pixel, link } = await linked();
+    expect(link.recipient).toBe('client+shop@example.com');
+    expect(link.url).toMatch(/^http:\/\/127\.0\.0\.1:8788\/outreach\/stop\/[a-f0-9]{64}$/u);
+    expect(link.url).not.toContain(pixel.token);
+    const repeated = await api<OptOutLink>(`/api/pixels/${pixel.id}/opt-out-link`, 'POST', {});
+    expect(repeated.data).toEqual(link);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data).toMatchObject({ optOutUrl: link.url, doNotContact: false });
+    expect(await env.DB.prepare('SELECT COUNT(*) count FROM opt_out_links').first('count')).toBe(1);
+  });
+
+  it('makes visits, HEAD, preview and scanner query parameters read-only without leaking private data', async () => {
+    const { pixel, link } = await linked();
+    await start(pixel);
+    await load(pixel);
+    const before = await counts();
+    const pixelBefore = await env.DB.prepare('SELECT * FROM pixels').first();
+    for (const suffix of ['', '?confirm=stop', '?unsubscribe=1&email=other@example.com']) {
+      for (const method of ['GET', 'HEAD']) {
+        const response = await fetchPixel(new Request(link.url + suffix, { method, headers: { 'User-Agent': 'Email security scanner' } }), env);
+        expect(response.status).toBe(200);
+        const html = await response.text();
+        if (method === 'HEAD') expect(html).toBe('');
+        else {
+          expect(html).toContain('Simply visiting this page does not change your preference');
+          expect(html).toContain('method="post"');
+          for (const privateText of [pixel.recipient, link.recipient, pixel.id, pixel.label, pixel.notes, env.OWNER_EMAIL]) expect(html).not.toContain(privateText);
+        }
+        expect(response.headers.get('Cache-Control')).toBe('no-store');
+        expect(response.headers.get('Referrer-Policy')).toBe('same-origin');
+        expect(response.headers.get('X-Frame-Options')).toBe('DENY');
+        expect(response.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
+        expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
+      }
+    }
+    expect(await counts()).toEqual(before);
+    expect(await env.DB.prepare('SELECT * FROM pixels').first()).toEqual(pixelBefore);
+  });
+
+  it('saves a confirmed choice once without changing tracking, events, reports, alerts or collecting request metadata', async () => {
+    const { pixel, link } = await linked();
+    await start(pixel); await load(pixel);
+    const before = await counts();
+    const pixelBefore = await env.DB.prepare('SELECT * FROM pixels').first();
+    const response = await confirm(link.url);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('Your preference has been saved');
+    const first = await env.DB.prepare('SELECT * FROM do_not_contact').first();
+    expect(first).toEqual({ recipient: link.recipient, created_at: expect.any(String), source: 'recipient' });
+    expect(Object.keys(first!)).toEqual(['recipient', 'created_at', 'source']);
+    const repeated = await confirm(link.url);
+    expect(repeated.status).toBe(200);
+    expect(await env.DB.prepare('SELECT * FROM do_not_contact').first()).toEqual(first);
+    expect(await counts()).toEqual({ ...before, blocked: 1 });
+    expect(await env.DB.prepare('SELECT * FROM pixels').first()).toEqual(pixelBefore);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data.doNotContact).toBe(true);
+  });
+
+  it('never exposes public dashboard APIs or an arbitrary-address opt-out form', async () => {
+    const { link } = await linked();
+    expect((await fetchPixel(new Request('http://127.0.0.1:8788/api/do-not-contact'), env)).status).toBe(404);
+    expect((await confirm(link.url, { body: 'confirm=stop&recipient=victim@example.com' })).status).toBe(403);
+    expect(await env.DB.prepare('SELECT COUNT(*) count FROM do_not_contact').first('count')).toBe(0);
+  });
+
+  it('rejects cross-origin, missing-origin, wrong form, missing confirmation and oversized submissions', async () => {
+    const { link } = await linked();
+    for (const options of [
+      { origin: 'https://unrelated.example' }, { origin: null }, { origin: 'null' }, { site: 'cross-site' },
+      { body: 'confirm=yes' }, { body: '' }, { body: 'confirm=stop&confirm=stop' },
+      { body: 'confirm=stop', contentType: 'application/json' }, { body: 'confirm=stop&extra=' + 'x'.repeat(300) },
+    ]) expect((await confirm(link.url, options)).status).toBe(403);
+    expect(await env.DB.prepare('SELECT COUNT(*) count FROM do_not_contact').first('count')).toBe(0);
+  });
+
+  it('does not change anything for malformed/unknown links or unsupported methods', async () => {
+    await linked();
+    const before = await counts();
+    for (const url of ['http://127.0.0.1:8788/outreach/stop', 'http://127.0.0.1:8788/outreach/stop/bad', `http://127.0.0.1:8788/outreach/stop/${'0'.repeat(64)}`]) {
+      expect((await fetchPixel(new Request(url), env)).status).toBe(404);
+      expect((await confirm(url)).status).toBe(404);
+    }
+    const { link } = await linked('other@example.com');
+    expect((await confirm(link.url, { method: 'PUT' })).status).toBe(405);
+    expect((await counts())?.blocked).toBe(0);
+    expect((await counts())?.events).toBe(before?.events);
+  });
+
+  it('keeps sent links bound to their original address across edits, clear/delete and retention', async () => {
+    const { pixel, link } = await linked('first@example.com');
+    const changed = await api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { recipient: 'second@example.com' });
+    expect(changed.data.optOutUrl).toBeNull();
+    const second = (await api<OptOutLink>(`/api/pixels/${pixel.id}/opt-out-link`, 'POST', {})).data;
+    expect(second.url).not.toBe(link.url);
+    await confirm(link.url);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data.doNotContact).toBe(false);
+    await api(`/api/pixels/${pixel.id}/events`, 'DELETE');
+    await api(`/api/pixels/${pixel.id}`, 'DELETE');
+    expect((await confirm(second.url)).status).toBe(200);
+    await enforceRetention(env, new Date('2040-01-01T00:00:00.000Z'));
+    expect(await env.DB.prepare('SELECT recipient FROM do_not_contact ORDER BY recipient').all()).toMatchObject({ results: [{ recipient: 'first@example.com' }, { recipient: 'second@example.com' }] });
+    expect(await env.DB.prepare('SELECT COUNT(*) count FROM opt_out_links').first('count')).toBe(2);
+  });
+
+  it('flags matching new records and prevents new starts or link generation without preventing history edits', async () => {
+    const { pixel, link } = await linked('Client@Example.com');
+    await confirm(link.url);
+    const another = (await api<Pixel>('/api/pixels', 'POST', { recipient: 'CLIENT@example.COM' })).data;
+    expect(another.doNotContact).toBe(true);
+    expect((await api<Bootstrap>('/api/bootstrap')).data.pixels.every((item) => item.doNotContact)).toBe(true);
+    const attempt = await start(another);
+    expect(attempt.response.status).toBe(409); expect(attempt.error?.code).toBe('DO_NOT_CONTACT');
+    expect((await api<OptOutLink>(`/api/pixels/${another.id}/opt-out-link`, 'POST', {})).response.status).toBe(409);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { notes: 'Respect permanent opt-out' })).response.status).toBe(200);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'paused' })).response.status).toBe(200);
+    expect((await api<Settings>('/api/settings')).data.emailEnabled).toBe(false);
+    const exported = await (await fetchDashboard(new Request(`${origin}/api/export.csv`), env)).text();
+    expect(exported.split('\r\n')[0]).toContain('"Do not contact"');
+    expect(exported.split('\r\n').filter(Boolean).slice(1).every((line) => line.endsWith(',"Yes"'))).toBe(true);
+  });
+
+  it('requires one saved recipient and permits only authenticated owner management', async () => {
+    const blank = await create();
+    expect((await api(`/api/pixels/${blank.id}/opt-out-link`, 'POST', {})).response.status).toBe(400);
+    expect((await api(`/api/pixels/${blank.id}/opt-out-link`, 'POST', { recipient: 'victim@example.com' })).response.status).toBe(400);
+    expect((await api(`/api/pixels/${blank.id}/opt-out-link`)).response.status).toBe(405);
+    for (const path of ['/api/do-not-contact', `/api/pixels/${blank.id}/opt-out-link`]) {
+      const production = { ...env, DEV_AUTH: undefined, DASHBOARD_ORIGIN: 'https://maildesk.soluredigitalworks.com', ACCESS_TEAM_DOMAIN: 'opt-out-private.cloudflareaccess.com', ACCESS_AUD: 'opt-out-private' };
+      const response = await fetchDashboard(new Request(production.DASHBOARD_ORIGIN + path), production);
+      expect(response.status).toBe(401);
+      expect(await response.text()).not.toContain('victim@example.com');
+    }
+  });
+
+  it('allows owner-recorded reply opt-outs with bounded search/paging, normalization and no alias collapsing', async () => {
+    expect((await api('/api/do-not-contact', 'POST', { recipient: '  CLIENT+shop@Example.COM  ' })).response.status).toBe(201);
+    expect((await api('/api/do-not-contact', 'POST', { recipient: 'client+shop@example.com' })).response.status).toBe(201);
+    await api('/api/do-not-contact', 'POST', { recipient: 'other@example.com' });
+    const page = (await api<DoNotContactPage>('/api/do-not-contact?q=EXAMPLE.COM&limit=1')).data;
+    expect(page).toMatchObject({ total: 2, offset: 0, hasMore: true });
+    expect(page.items[0]).toMatchObject({ source: 'owner', createdAt: expect.any(String) });
+    const all = (await api<DoNotContactPage>('/api/do-not-contact')).data;
+    expect(all.items.map((item) => item.recipient).sort()).toEqual(['client+shop@example.com', 'other@example.com']);
+    expect((await api<DoNotContactPage>('/api/do-not-contact?q=client@example.com')).data.total).toBe(0);
+    for (const query of ['limit=0', 'limit=201', 'offset=-1', 'q=a&q=b', 'unknown=x']) expect((await api('/api/do-not-contact?' + query)).response.status).toBe(400);
+    for (const recipient of ['', 'not an email', 'a@example.com,b@example.com', 'a\r\nb@example.com', 'a@-example.com', 'a..b@example.com']) expect((await api('/api/do-not-contact', 'POST', { recipient })).response.status).toBe(400);
+    expect((await api('/api/do-not-contact', 'POST', { recipient: 'valid@example.com', notes: 'No private extra fields' })).response.status).toBe(400);
+    expect((await api('/api/do-not-contact', 'DELETE', {})).response.status).toBe(405);
+  });
+
+  it('rechecks opt-out inside the activation write, preserving inactive state and the email master in a confirmation race', async () => {
+    const { pixel, link } = await linked('race@example.com');
+    let inserted = false;
+    const DB = { prepare: env.DB.prepare.bind(env.DB), batch: async <T>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]> => {
+      if (!inserted) { inserted = true; await confirm(link.url); }
+      return env.DB.batch<T>(statements);
+    } } as unknown as D1Database;
+    const response = await api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'armed', enableEmailAlerts: true }, { DB });
+    expect(inserted).toBe(true);
+    expect(response.response.status).toBe(409);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data).toMatchObject({ status: 'draft', activationId: null, doNotContact: true });
+    expect((await api<Settings>('/api/settings')).data.emailEnabled).toBe(false);
+  });
+
+  it('rechecks suppression in link creation when an opt-out is recorded after the initial lookup', async () => {
+    const pixel = (await api<Pixel>('/api/pixels', 'POST', { recipient: 'link-race@example.com' })).data;
+    let intercepted = false;
+    const DB = { ...env.DB, prepare(sql: string) {
+      const statement = env.DB.prepare(sql);
+      if (sql.startsWith('INSERT OR IGNORE INTO opt_out_links')) return { bind(...values: (string | number | null)[]) {
+        const bound = statement.bind(...values);
+        return { run: async () => {
+          intercepted = true;
+          await api('/api/do-not-contact', 'POST', { recipient: pixel.recipient });
+          return bound.run();
+        } } as unknown as D1PreparedStatement;
+      } } as unknown as D1PreparedStatement;
+      return statement;
+    } } as unknown as D1Database;
+    const attempt = await api<OptOutLink>(`/api/pixels/${pixel.id}/opt-out-link`, 'POST', {}, { DB });
+    expect(intercepted).toBe(true);
+    expect(attempt.response.status).toBe(409);
+    expect(await env.DB.prepare('SELECT COUNT(*) count FROM opt_out_links').first('count')).toBe(0);
+  });
+
+  it('cannot bypass a blocked start by changing an already-active blank tracker to an opted-out recipient', async () => {
+    const pixel = await create();
+    await start(pixel);
+    await api('/api/do-not-contact', 'POST', { recipient: 'blocked@example.com' });
+    const attempt = await api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { recipient: 'BLOCKED@example.com' });
+    expect(attempt.response.status).toBe(409);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data.recipient).toBe('');
+  });
+
+  it('does not enable the workspace email master when a simultaneous active-recipient change is blocked by opt-out', async () => {
+    const pixel = (await api<Pixel>('/api/pixels', 'POST', { recipient: 'original@example.com' })).data;
+    await arm(pixel);
+    let intercepted = false;
+    const DB = { prepare: env.DB.prepare.bind(env.DB), batch: async <T>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]> => {
+      if (!intercepted) { intercepted = true; await api('/api/do-not-contact', 'POST', { recipient: 'newly-blocked@example.com' }); }
+      return env.DB.batch<T>(statements);
+    } } as unknown as D1Database;
+    const response = await api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'armed', enableEmailAlerts: true, recipient: 'newly-blocked@example.com' }, { DB });
+    expect(intercepted).toBe(true);
+    expect(response.response.status).toBe(409);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data.recipient).toBe('original@example.com');
+    expect((await api<Settings>('/api/settings')).data.emailEnabled).toBe(false);
   });
 });
