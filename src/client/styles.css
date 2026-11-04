@@ -935,6 +935,124 @@ a {
   margin-top: 15px;
   flex-wrap: wrap;
 }
+.email-format {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 0;
+  margin: 16px 0 0;
+  border: 0;
+  min-width: 0;
+}
+.email-format legend {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #596675;
+}
+.email-format label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: #4b5764;
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.email-format label:has(input:checked) {
+  border-color: #b55d24;
+  background: #fff6ed;
+  color: #763d19;
+}
+.email-format input,
+.signature-preview-heading input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #aa501b;
+}
+.signature-preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  color: #596675;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.signature-preview-heading label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.signature-preview {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: #0e141b;
+  font-family: Arial, Helvetica, sans-serif;
+}
+.signature-preview-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.signature-preview-identity img,
+.signature-logo-hidden {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 50px;
+}
+.signature-preview-identity > div {
+  min-width: 0;
+}
+.signature-preview-identity strong {
+  display: block;
+  font-size: 14px;
+  line-height: 20px;
+}
+.signature-preview-identity > div > span {
+  display: block;
+  font-size: 12px;
+  line-height: 18px;
+}
+.signature-logo-hidden {
+  display: grid;
+  place-content: center;
+  border: 1px dashed #b9bfc5;
+  color: #65717c;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
+.signature-preview-contact {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+.signature-preview-contact a {
+  display: block;
+  color: #334b61;
+  text-decoration: underline;
+}
+.signature-note {
+  margin-top: 10px;
+  color: #596675;
+  font-size: 12px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
 .copy-actions .button {
   font-size: 13px;
   min-height: 34px;

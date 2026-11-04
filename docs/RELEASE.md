@@ -2,6 +2,16 @@
 
 This runbook separates confirmed setup from remaining release checks. The owner authorized implementation and deployment; completion still requires the evidence below. Keep the current Microsoft MX, SPF, DKIM, DMARC and public MTA-STS service intact.
 
+## Tracked-logo release checkpoint — November 4, 2026
+
+The signature extension is implemented and locally verified, but publication, CI, deployment and live checks are pending. It adds a per-message PNG logo using the existing image-capture behavior and a separate untracked preview asset. The signature contains readable contact text and one tracked logo; the invisible GIF remains an alternative. Existing report dispatch, permanent loaded history, preservation controls, request-detail collection and capture caps remain unchanged. No DNS, database migration, dependency, service or paid plan change is needed.
+
+Before release, run the full checks and both Worker bundles on the exact reviewed source. Deploy the public image Worker before or together with the dashboard so freshly copied logo URLs are available. Verify PNG content/dimensions, cache-prevention headers, equivalent known/unknown responses, HEAD without activity, untracked preview requests and retained GIF behavior. Confirm owner-only dashboard access and that preview/copy operations leave the selected message’s load count unchanged. Record the exact publication, CI and deployed versions separately from these local results.
+
+Actual Outlook insertion is a separate acceptance check. Test a fresh message in the browser and Outlook on iPhone; inspect the received source for the unique remote `/p/<token>/logo.png` address, readable fallback contact details and absence of a second hidden GIF or embedded image replacement. Confirm a controlled load reaches that message’s existing timeline. Do not claim Outlook compatibility, human-read detection or a deliverability improvement from a build or clipboard check alone.
+
+If this extension needs recovery, deploy a corrected build retaining the new public logo URLs and existing report/retention guards; the dashboard signature option can be disabled separately. Returning the public Worker to an older release would break logo URLs already sent. Never restore code predating permanent-history and accepted-report cleanup guards. No database rollback is required or authorized for this extension.
+
 ## Current report release status — November 4, 2026
 
 The 89-day report implementation is published as `e5f423a07a4719eb5334ad295d2dc6eec0cd1165`, tree `b9f65be35af341417d8a700685b148f611315a11`, with passing [CI run 41802564631](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41802564631). A fresh private export and disposable `0005` rehearsal preserved four pixels, eight events and two notifications. Remote `0005` and dashboard version `[internal identifier recorded privately]` are deployed; the existing minute schedule, public image service and owner Access remain intact. Live Reports and an existing pixel’s calculated due date displayed correctly. Production counts/preferences were preserved.

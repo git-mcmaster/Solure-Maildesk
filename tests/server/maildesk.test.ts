@@ -143,6 +143,109 @@ describe('owner access and request validation', () => {
 });
 
 describe('image requests and manual labeling', () => {
+  const logoUrl = (pixel: Pixel) => pixel.pixelUrl.replace(/\.gif$/u, '/logo.png');
+
+  it('serves an untracked logo preview without accessing storage or recording activity', async () => {
+    const prepare = vi.fn(() => { throw new Error('A preview must not access storage'); });
+    const previewEnv = { ...env, DB: { prepare } as unknown as D1Database };
+    const previewUrl = `${env.PIXEL_ORIGIN}/brand/solure-logo-v1.png`;
+    const response = await fetchPixel(new Request(previewUrl), previewEnv);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('image/png');
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=86400');
+    expect(bytes).toHaveLength(3201);
+    expect([...bytes.slice(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    const dimensions = new DataView(bytes.buffer);
+    expect([dimensions.getUint32(16), dimensions.getUint32(20)]).toEqual([192, 200]);
+    const head = await fetchPixel(new Request(previewUrl, { method: 'HEAD' }), previewEnv);
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe('');
+    expect([...head.headers]).toEqual([...response.headers]);
+    expect((await fetchPixel(new Request(previewUrl, { method: 'POST' }), previewEnv)).status).toBe(405);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(0);
+  });
+
+  it('keeps tracked logo responses identical for known, unknown, archived, deleted and unavailable storage', async () => {
+    const pixel = await create('Private label must not leak');
+    const requestUrl = logoUrl(pixel);
+    const known = await fetchPixel(new Request(requestUrl), env);
+    const expectedBytes = await known.arrayBuffer();
+    expect(known.status).toBe(200);
+    expect(known.headers.get('Content-Type')).toBe('image/png');
+    expect(known.headers.get('Cache-Control')).toContain('no-store');
+    expect(known.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+    expect(expectedBytes.byteLength).toBe(3201);
+
+    const unknown = await fetchPixel(new Request(`${env.PIXEL_ORIGIN}/p/${'0'.repeat(32)}/logo.png`), env);
+    await api(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'archived' });
+    const archived = await fetchPixel(new Request(requestUrl), env);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data).toMatchObject({ loadCount: 1, hasRecordedLoad: true });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failed = await fetchPixel(new Request(requestUrl), { ...env, DB: { prepare() { throw new Error('Unavailable'); } } as unknown as D1Database });
+    expect(errorLog).toHaveBeenCalledWith('Pixel event recording failed');
+    await api(`/api/pixels/${pixel.id}`, 'DELETE');
+    const deleted = await fetchPixel(new Request(requestUrl), env);
+    for (const response of [unknown, archived, failed, deleted]) {
+      expect(response.status).toBe(known.status);
+      expect([...response.headers]).toEqual([...known.headers]);
+      expect(await response.arrayBuffer()).toEqual(expectedBytes);
+    }
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(0);
+  });
+
+  it('does not record logo HEAD requests or expose token validity through its response', async () => {
+    const pixel = await create();
+    const prepare = vi.fn(() => { throw new Error('HEAD must not access storage'); });
+    const headEnv = { ...env, DB: { prepare } as unknown as D1Database };
+    const known = await fetchPixel(new Request(logoUrl(pixel), { method: 'HEAD' }), headEnv);
+    const unknown = await fetchPixel(new Request(`${env.PIXEL_ORIGIN}/p/${'0'.repeat(32)}/logo.png`, { method: 'HEAD' }), headEnv);
+    expect(known.status).toBe(200);
+    expect(unknown.status).toBe(200);
+    expect(await known.text()).toBe('');
+    expect(await unknown.text()).toBe('');
+    expect([...known.headers]).toEqual([...unknown.headers]);
+    expect(known.headers.get('Content-Type')).toBe('image/png');
+    expect(prepare).not.toHaveBeenCalled();
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data.loadCount).toBe(0);
+    for (const suffix of ['/logo.svg', '/logo.png/extra', '.png']) {
+      expect((await fetchPixel(new Request(`${env.PIXEL_ORIGIN}/p/${pixel.token}${suffix}`), env)).status).toBe(404);
+    }
+    expect((await fetchPixel(new Request(logoUrl(pixel), { method: 'POST' }), env)).status).toBe(405);
+  });
+
+  it('shares logo and GIF capture, metadata, phases and first-alert deduplication in one pixel history', async () => {
+    const pixel = await create();
+    await api('/api/settings', 'PATCH', { captureRequestDetails: true, emailEnabled: true });
+    await fetchPixel(detailedRequest({ ...pixel, pixelUrl: logoUrl(pixel) }), env);
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data).toMatchObject({ loadCount: 1, earlyLoadCount: 1, hasRecordedLoad: true, notificationStatus: 'none' });
+    await arm(pixel);
+    await Promise.all(Array.from({ length: 10 }, (_, index) => fetchPixel(detailedRequest(index % 2 ? pixel : { ...pixel, pixelUrl: logoUrl(pixel) }), env)));
+    const saved = (await api<Pixel>(`/api/pixels/${pixel.id}`)).data;
+    const events = (await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data;
+    expect(saved).toMatchObject({ loadCount: 11, earlyLoadCount: 1, hasRecordedLoad: true, notificationStatus: 'pending' });
+    expect(events).toHaveLength(11);
+    expect(events.filter((event) => event.phase === 'before_arming')).toHaveLength(1);
+    expect(events.filter((event) => event.phase === 'after_arming')).toHaveLength(10);
+    expect(events.every((event) => event.metadata?.requestIp === '198.51.100.23')).toBe(true);
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications).toHaveLength(1);
+  });
+
+  it('applies one atomic per-pixel and account cap to mixed logo and GIF requests', async () => {
+    const pixel = await create();
+    const now = new Date().toISOString();
+    await env.DB.batch(Array.from({ length: 199 }, () => env.DB.prepare("INSERT INTO events (id,pixel_id,created_at,phase) VALUES (?,?,?,'before_arming')").bind(crypto.randomUUID(), pixel.id, now)));
+    await Promise.all(Array.from({ length: 10 }, (_, index) => fetchPixel(new Request(index % 2 ? pixel.pixelUrl : logoUrl(pixel)), env)));
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data.loadCount).toBe(200);
+    expect(await env.DB.prepare('SELECT event_count FROM settings WHERE id=1').first('event_count')).toBe(200);
+    const other = await create();
+    await env.DB.prepare('UPDATE settings SET event_count=9999 WHERE id=1').run();
+    await Promise.all(Array.from({ length: 10 }, (_, index) => fetchPixel(new Request(index % 2 ? other.pixelUrl : logoUrl(other)), env)));
+    expect((await api<Pixel>(`/api/pixels/${other.id}`)).data.loadCount).toBe(1);
+    expect(await env.DB.prepare('SELECT event_count FROM settings WHERE id=1').first('event_count')).toBe(10000);
+  });
+
   it('records early loads without notifying and preserves events when labeled afterward', async () => {
     const pixel = await create();
     await load(pixel);

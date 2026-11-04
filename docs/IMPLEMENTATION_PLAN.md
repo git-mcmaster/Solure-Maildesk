@@ -2,6 +2,16 @@
 
 Status: approved scope for local implementation; production deployment, DNS, live email sending and tenant changes remain separate release steps. November 2, 2026.
 
+## Tracked-logo signature extension — November 4, 2026
+
+The owner approved improving and implementing the signature workflow. A message-specific Solure logo replaces the separate hidden pixel when “Logo signature” is selected, giving the image a useful visible purpose while keeping name and contact details readable as text. The original invisible pixel remains an alternative. This extension is implemented locally and passed the 78-test suite, TypeScript and local browser/clipboard checks. Publication, CI, deployment and live endpoint checks remain pending; actual Outlook on iPhone insertion and received MIME remain unverified.
+
+Reuse the approved 192 × 200 PNG at a 48 × 50 display size. Serve it through `/p/<token>/logo.png` using the existing capture path, metadata preference, request caps and alert rules. Retain legacy `/p/<token>.gif` URLs. Serve dashboard previews from the separate untracked `/brand/solure-logo-v1.png` endpoint; previewing or copying must not create activity. HEAD requests do not record activity, and tracked-logo responses do not reveal whether the token exists or capture succeeded.
+
+Offer rich `text/html` and clean `text/plain` clipboard content, plus explicit HTML-source and text-only options. Generated signature HTML contains exactly one tracked image, escaped contact text and direct contact links. Explain that each email needs a fresh signature, a global reusable Outlook signature combines history, text-only copying does not track and raw HTML requires an HTML-aware insertion method. Do not claim the logo bypasses image blocking, identifies a reader or improves deliverability.
+
+No dependency, database schema, retention/report behavior, DNS, access policy, sender setup or paid service changes are required. Deploy the public image endpoint before or together with the dashboard, then verify the new public routes and retained GIF route. A user-controlled Outlook/browser and iPhone test must inspect the received message’s external image URL and resulting request before either insertion method is marked supported.
+
 ## 89-day report extension — November 4, 2026
 
 The owner requested a report for every pixel at 89 elapsed days from creation, sent to `elijah@soluredigitalworks.com`. The extension is published, migrated and deployed. All 62 backend/metadata tests, TypeScript, the build and bundles passed. The sender configuration subsequently passed complete CI and a controlled scheduled report reached the owner’s Inbox. A real elapsed 89-day boundary remains unobserved. The dated original plan below remains context; this extension adds a mandatory report independent of the optional image-load email-alert preference.

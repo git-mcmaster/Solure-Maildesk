@@ -1,5 +1,26 @@
 # Verification record
 
+## Tracked-logo local verification — November 4, 2026
+
+This checkpoint covers the implemented signature extension before publication or deployment. The root implementation agent ran the checks and local browser review below; the separate integration/security review found no material defect in the inspected changes. Existing production report/sender evidence follows in its own dated section and does not verify this extension live.
+
+| Check | Observed result |
+| --- | --- |
+| `node node_modules/vitest/vitest.mjs run` | 78/78 tests passed in three files, including the new signature helper and retained backend/metadata coverage; direct installed Node 24.22.1 |
+| `node node_modules/typescript/bin/tsc --noEmit` | Passed |
+| `node node_modules/vite/bin/vite.js build` | Passed |
+| `node node_modules/wrangler/bin/wrangler.js deploy --dry-run --config wrangler.dashboard.jsonc --outdir dist/dashboard-worker` | Passed: 74.88 KiB / 19.74 KiB gzip; no deployment |
+| `node node_modules/wrangler/bin/wrangler.js deploy --dry-run --config wrangler.pixel.jsonc --outdir dist/pixel-worker` | Passed: 11.43 KiB / 6.14 KiB gzip; no deployment |
+| `git diff --check` | Passed |
+| Logo asset and local preview | The approved static preview returned a 192 × 200 PNG; the signature displays it at 48 × 50 with readable contact text |
+| Rich clipboard | “Copy for Outlook” supplied `text/html` and `text/plain`; signature HTML contained exactly one unique `/p/<token>/logo.png`, no hidden GIF, and the text fallback contained four clean contact lines |
+| Self-load protection and capture | Viewing the preview, hiding its image, copying the signature and HEAD left the selected local message at zero recorded loads. A controlled GET returned the exact approved 3,201-byte PNG and changed its count from zero to one. The preview uses `/brand/solure-logo-v1.png` |
+| Narrow layouts | Actual local interface checked at 320/390 CSS-pixel widths without horizontal overflow; these are browser viewport checks, not physical-phone tests |
+| Capture/security review | Logo and GIF share capture rules, metadata controls and caps; HEAD and the static preview do not capture. Known, unknown, archived and storage-failure logo responses use the same PNG/headers. Contact text is escaped and the email link encoded |
+| Scope | No database migration, DNS, sender, access policy, dependency or service change; report/retention behavior is preserved |
+
+Publication, CI, deployment and production endpoint verification are pending at this checkpoint. Actual Outlook browser/iPhone insertion, received MIME/source preservation and the resulting email-client request remain unverified. Clipboard support alone does not establish those outcomes. Image blocks, proxies, scanners and caches still limit interpretation; no deliverability improvement or verified human read is claimed.
+
 ## Report sender activation — November 4, 2026
 
 The owner explicitly approved the temporary Solure-only setup key after its broader Zone Settings Edit permission was explained. Source configuration `51f893e5677a73202410bf2d9ad202c50c74d859`, tree `6fb90ccdc58836b1901a44be57b4eb9e6855a29a`, matches the local configuration tree. [CI run 41808317650](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41808317650) completed successfully, including `pnpm check` (TypeScript, 62 tests, client build) and `pnpm bundle:check`. No application logic, dependencies or migration changed in this activation.

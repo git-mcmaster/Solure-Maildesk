@@ -18,6 +18,7 @@ import type {
   RequestMetadata,
   Settings,
 } from "../server/types";
+import { emailContent, imageAddresses, type EmailImageFormat } from "./signature";
 
 type IconName =
   | "grid"
@@ -155,10 +156,6 @@ function formatDate(value: string | null, exact = false): string {
         minute: "2-digit",
       });
 }
-function htmlFor(pixel: Pixel): string {
-  return `<img src="${pixel.pixelUrl.replaceAll("&", "&amp;").replaceAll('"', "&quot;")}" width="1" height="1" alt="" style="width:1px;height:1px;border:0;" />`;
-}
-
 function requestLocation(metadata: RequestMetadata): string {
   return [metadata.city, metadata.region, metadata.country]
     .filter(Boolean)
@@ -387,6 +384,8 @@ export default function App() {
   const reportsExpandedRef = useRef(false);
   const reportsPendingRef = useRef(false);
   const [copyNotice, setCopyNotice] = useState("");
+  const [emailFormat, setEmailFormat] = useState<EmailImageFormat>("signature");
+  const [previewImages, setPreviewImages] = useState(true);
   const detailRef = useRef<HTMLElement>(null);
   const deepLinkOpened = useRef(false);
   const selected = selectedRecord;
@@ -705,18 +704,20 @@ export default function App() {
     });
   }
   async function copyPixel(rich: boolean) {
-    if (!selected) return;
-    const html = htmlFor(selected);
+    if (!selected || !data) return;
+    const { html, plainText } = emailContent(selected.pixelUrl, data.ownerEmail, emailFormat);
     try {
       if (rich && "ClipboardItem" in window && navigator.clipboard?.write) {
         await navigator.clipboard.write([
           new ClipboardItem({
             "text/html": new Blob([html], { type: "text/html" }),
-            "text/plain": new Blob([html], { type: "text/plain" }),
+            "text/plain": new Blob([plainText], { type: "text/plain" }),
           }),
         ]);
         setCopyNotice(
-          "Rich HTML copied. Outlook may still embed or remove it—verify your insertion method with a test message.",
+          emailFormat === "signature"
+            ? "Signature copied with one message-specific logo image. If your app pastes only contact text, tracking was not inserted. Verify with a test email."
+            : "Rich HTML copied. Outlook may still embed or remove the image—verify your insertion method with a test message.",
         );
       } else {
         await navigator.clipboard.writeText(html);
@@ -728,6 +729,15 @@ export default function App() {
       setCopyNotice(
         "Clipboard access is unavailable. Select and copy the HTML below. Use a client that supports inserting HTML; pasting it as text will not track loads.",
       );
+    }
+  }
+  async function copyTextSignature() {
+    if (!selected || !data) return;
+    try {
+      await navigator.clipboard.writeText(emailContent(selected.pixelUrl, data.ownerEmail, "signature").plainText);
+      setCopyNotice("Contact text copied. This version has no image and does not record loads.");
+    } catch {
+      setCopyNotice("Clipboard access is unavailable. You can select and copy the contact text in the preview.");
     }
   }
   async function preserveUnloadedPixel(preserveUnloaded: boolean) {
@@ -1167,13 +1177,69 @@ export default function App() {
                   <div className="workflow-step">
                     <span className="step-number">1</span>
                     <div>
-                      <h3>Add the pixel to your email</h3>
+                      <h3>Add your signature or tracking image</h3>
                       <p>
-                        Copy the image HTML and insert it using a verified
-                        Outlook method.
+                        Use a fresh message-specific image for each email.
+                        Copy it into Outlook, then send as usual.
                       </p>
                     </div>
                   </div>
+                  <fieldset className="email-format">
+                    <legend>Email format</legend>
+                    <label>
+                      <input
+                        type="radio"
+                        name="email-format"
+                        checked={emailFormat === "signature"}
+                        onChange={() => { setEmailFormat("signature"); setCopyNotice(""); }}
+                      />
+                      <span>Logo signature</span>
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="email-format"
+                        checked={emailFormat === "pixel"}
+                        onChange={() => { setEmailFormat("pixel"); setCopyNotice(""); }}
+                      />
+                      <span>Invisible pixel</span>
+                    </label>
+                  </fieldset>
+                  {emailFormat === "signature" ? (
+                    <div className="signature-option">
+                      <div className="signature-preview-heading">
+                        <span>Signature preview</span>
+                        <label>
+                          <input type="checkbox" checked={!previewImages} onChange={(event) => setPreviewImages(!event.target.checked)} />
+                          Images hidden
+                        </label>
+                      </div>
+                      <div className="signature-preview" aria-label="Signature preview, not tracked">
+                        <div className="signature-preview-identity">
+                          {previewImages ? (
+                            <img src={imageAddresses(selected.pixelUrl).preview} width={48} height={50} alt="Solure Digital Works logo" />
+                          ) : (
+                            <span className="signature-logo-hidden" role="img" aria-label="Solure Digital Works logo, image hidden">Logo<br />hidden</span>
+                          )}
+                          <div><strong>Elijah McMaster</strong><span>Solure Digital Works</span></div>
+                        </div>
+                        <div className="signature-preview-contact">
+                          <a href={`mailto:${data.ownerEmail}`}>{data.ownerEmail}</a>
+                          <a href="https://soluredigitalworks.com" target="_blank" rel="noreferrer">soluredigitalworks.com</a>
+                        </div>
+                      </div>
+                      <p className="signature-note">
+                        The logo records image requests for this message. There’s
+                        no extra hidden pixel. This preview is untracked—use the
+                        copy button to get your message’s unique image.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="signature-note">
+                      A transparent 1 × 1 image for an email that already has a
+                      signature. Use this or the logo signature, not both.
+                    </p>
+                  )}
                   <div className="copy-actions">
                     <button
                       className="button secondary"
@@ -1187,13 +1253,16 @@ export default function App() {
                     >
                       Copy HTML
                     </button>
+                    {emailFormat === "signature" && (
+                      <button className="text-button" onClick={() => void copyTextSignature()}>Copy text only</button>
+                    )}
                   </div>
                   <details className="html-details">
-                    <summary>View image HTML</summary>
+                    <summary>{emailFormat === "signature" ? "View signature HTML" : "View image HTML"}</summary>
                     <textarea
                       readOnly
-                      aria-label="Tracking image HTML"
-                      value={htmlFor(selected)}
+                      aria-label={emailFormat === "signature" ? "Tracked signature HTML" : "Tracking image HTML"}
+                      value={emailContent(selected.pixelUrl, data.ownerEmail, emailFormat).html}
                       onFocus={(event) => event.target.select()}
                       rows={4}
                       spellCheck={false}
@@ -1208,6 +1277,11 @@ export default function App() {
                       {copyNotice}
                     </p>
                   )}
+                  <p className="compatibility-note">
+                    Gmail can keep images blocked until the recipient allows
+                    them. Your contact text stays readable. Image loads may
+                    come from Google’s proxy and don’t prove a human read.
+                  </p>
                   <p className="compatibility-note">
                     Outlook on iPhone: insertion method not yet verified.{" "}
                     <button
@@ -1550,14 +1624,15 @@ export default function App() {
         >
           <div className="dialog-body prose">
             <p>
-              Each pixel is a tiny remote image with its own address. A request
-              for that image creates an activity event. Your message label,
+              Each message has its own remote image: a signature logo or a
+              transparent pixel. A request for that image creates an activity
+              event. Your message label,
               recipient and notes stay in your private workspace.
             </p>
             <h3>Test your Outlook insertion method first</h3>
             <ol>
               <li>
-                Create a pixel and use “Copy for Outlook,” or insert its HTML
+                Create a pixel, choose its email format and use “Copy for Outlook,” or insert its HTML
                 through a client that supports HTML insertion.
               </li>
               <li>Send a test message to an inbox you control.</li>
@@ -1572,6 +1647,13 @@ export default function App() {
               Normal image insertion can embed the file. A pasted URL or pasted
               HTML source alone is not a tracking image. Outlook on iPhone
               remains unverified until this test passes.
+            </p>
+            <p>
+              Copy a fresh tracked signature for every message. Saving one as
+              your reusable Outlook signature combines those messages’ activity.
+              The logo signature uses one tracked image and real contact text;
+              no additional invisible pixel is needed. The dashboard preview
+              uses a separate untracked image.
             </p>
             <h3>What a load can tell you</h3>
             <p>

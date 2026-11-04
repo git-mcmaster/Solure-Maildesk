@@ -10,6 +10,8 @@ This is a standalone app prepared for GitHub and Cloudflare. Source implementati
 
 The November 4 update is published and deployed at https://maildesk.soluredigitalworks.com/. Every pixel gets a saved report after 89 elapsed days. A native email binding sends only to the verified Solure owner from `reports@notifications.soluredigitalworks.com`. A clearly labeled setup report passed the live scheduled dispatcher on its first attempt, and the owner confirmed Inbox arrival. Processing a real pixel at its elapsed 89-day boundary remains unobserved. See the dated verification record for evidence and limits.
 
+The subsequent tracked-logo signature extension is implemented and locally verified; its publication, deployment and production checks are pending. It adds no DNS change, database migration or service. Actual Outlook insertion, including Outlook on iPhone, still needs a received-message/source check.
+
 ## What is included
 
 - Private dashboard, server-side search, pagination and message details.
@@ -23,6 +25,14 @@ The November 4 update is published and deployed at https://maildesk.soluredigita
 - Cloudflare Access JWT verification, exact owner identity and same-origin mutations.
 
 The app does not read your Outlook mailbox. Recipient and message labels are manually entered. Actual Outlook image insertion and optional image-load email alerts still require their own user-controlled test. The separately tested scheduled report reached the owner’s Inbox.
+
+## Tracked-logo signature
+
+Open a message and choose “Logo signature,” then “Copy for Outlook.” The rich-text clipboard contains the Solure logo, Elijah’s name, business, email and website; it also includes a clean four-line plain-text fallback. The existing approved logo displays at 48 × 50 pixels and is the signature’s **only** tracking image. “Invisible pixel” remains an alternative; use one format per message.
+
+Create and copy a fresh signature for each email. Reusing one tracked signature as Outlook’s global signature combines those emails’ activity in one history. Label and arm the message after sending, as with the original pixel workflow. “Copy HTML” provides source for an HTML-aware insertion method; pasting that source into ordinary email text does not insert the image. “Copy text only” has no image or tracking.
+
+The dashboard’s preview uses a separate untracked logo, so viewing, hiding or copying it does not record a load. “Images hidden” previews the readable contact text without the logo. An email client may still block images, proxy or cache them, and a request does not prove a human read the email. The logo does not bypass those controls or establish a deliverability improvement. Outlook on iPhone’s handling of the copied signature and external image must be tested before treating that client as supported.
 
 ## Local development
 
@@ -69,7 +79,7 @@ Keep `.dev.vars`, credentials, database files, dependency folders and build outp
 
 Store private labels, optional recipient/notes, image-load timestamps, lifecycle state and notification state. Request-detail collection is off by default. When the owner enables it in preferences, new recorded loads can also save the fetching connection’s IP, approximate city/region/country, time zone, network number/organization and bounded User-Agent with reported client/platform/device hints. No GPS coordinates, postal code, cookies, message bodies or external geolocation lookup are used. Pixel URLs contain random tokens, not recipient addresses.
 
-These details describe an image request, not a verified reader. Email proxies, scanners, VPNs and forwarding can replace or obscure the person’s location and device. An explicit proxy User-Agent suppresses device/platform attribution; missing information stays unknown. Older loads cannot be backfilled. Turning collection off stops future capture; stored details remain permanently after a recorded load unless you clear activity or delete the pixel. Details appear only in the authenticated owner timeline, not in the public GIF or summary CSV.
+These details describe an image request, not a verified reader. Email proxies, scanners, VPNs and forwarding can replace or obscure the person’s location and device. An explicit proxy User-Agent suppresses device/platform attribution; missing information stays unknown. Older loads cannot be backfilled. Turning collection off stops future capture; stored details remain permanently after a recorded load unless you clear activity or delete the pixel. Details appear only in the authenticated owner timeline, not in public images or summary CSV.
 
 Select a pixel to see a single history, newest first. Every entry groups its timestamp with the approximate location, reported client/device or proxy and network captured for that particular load; expand the same entry for its IP, time zone, network number and raw reported User-Agent. “Load earlier requests” reaches the rest of the retained history in stable pages, including beyond 1,000 events. An expanded history stays still while you read; Refresh starts again with the latest page. The timeline states when details were not collected, rather than attaching another load’s data.
 
