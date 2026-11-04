@@ -6,9 +6,13 @@ This runbook separates confirmed setup from remaining release checks. The owner 
 
 The 89-day report implementation is published as `e5f423a07a4719eb5334ad295d2dc6eec0cd1165`, tree `b9f65be35af341417d8a700685b148f611315a11`, with passing [CI run 41802564631](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41802564631). A fresh private export and disposable `0005` rehearsal preserved four pixels, eight events and two notifications. Remote `0005` and dashboard version `[internal identifier recorded privately]` are deployed; the existing minute schedule, public image service and owner Access remain intact. Live Reports and an existing pixel’s calculated due date displayed correctly. Production counts/preferences were preserved.
 
-**Email sending remains pending.** The owner destination is verified, but no live sender/binding has been configured and no report email has been sent. The temporary setup credential remains uncreated while permission is discussed. No paid plan or mail DNS change was made. Unsent reports hold unused pixels beyond 90 days. Do not roll back to older cleanup code; it does not enforce the report-before-delete condition. See [VERIFICATION.md](VERIFICATION.md) for exact evidence and limitations.
+**Report email sending is live.** The follow-up sender configuration is published as `51f893e5677a73202410bf2d9ad202c50c74d859`, tree `6fb90ccdc58836b1901a44be57b4eb9e6855a29a`, and deployed. [CI run 41808317650](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41808317650) passed the complete checks. The native `EMAIL` binding is restricted to the verified owner address and uses `reports@notifications.soluredigitalworks.com`. A clearly labeled synthetic report was accepted on the first ordinary scheduled attempt at 4:34 AM EST on November 4; the owner confirmed it arrived in Inbox. No real pixel was aged or edited for this test. A real elapsed 89-day boundary remains unobserved.
 
-## 89-day reports — November 4, 2026, local implementation
+The owner approved the temporary Zone Settings Edit / DNS Read key for setup. It was created, used only for the approved sender setup, then revoked; a subsequent API verification returned HTTP 401. The local secret copy was removed. No paid upgrade was accepted. Every pre-existing DNS record was unchanged. Cloudflare added three MX records and one SPF TXT at `notifications.soluredigitalworks.com`, plus its managed Routing DKIM selector at `cf2024-1._domainkey.soluredigitalworks.com`. This fifth authentication record was absent from the preview and is explicitly recorded here. Microsoft’s apex MX/SPF and selector1/selector2 remain intact. Cloudflare’s parent Routing status reports a Microsoft MX/SPF mismatch; do not replace those records to make that status green. The separately configured notifications subdomain is ready, and the bounded owner-only send worked.
+
+Unsent reports hold unused pixels beyond 90 days. Do not roll back to older cleanup code; it does not enforce the report-before-delete condition. To pause sending without changing retention, remove `EMAIL_MODE=live` in a reviewed configuration release; pending reports then hold cleanup. See [VERIFICATION.md](VERIFICATION.md) for exact evidence and limitations.
+
+## Historical pre-release checkpoint — November 4, 2026, local implementation
 
 The owner requested one automatically generated report for every pixel at 89 days from creation, sent to `elijah@soluredigitalworks.com`. This update is implemented locally and passed 62 tests and TypeScript; it is **not yet published, migrated remotely or deployed**. Existing production release evidence below describes earlier code. Browser review and any sender provisioning are separate checks.
 
@@ -27,7 +31,7 @@ Loaded pixels and history remain permanent unless explicitly cleared/deleted. Th
 - Apply only to the confirmed dedicated Maildesk database, then deploy the reviewed dashboard Worker promptly and verify the new scheduler order and report access controls. The public image code and Microsoft mail DNS do not require changes for report generation.
 - **Do not roll back to code predating this report guard.** Earlier permanent-history code can delete unused pixels after 90 days without a sent report; still older code can age-delete loaded activity. Recover with a corrected build that retains both permanent-history and accepted-report cleanup rules. A database restore replaces newer data and requires explicit approval; it does not recall accepted emails. Additive schema changes alone are not a data-preserving reverse migration.
 
-### Sending remains unconfigured
+### Historical sender investigation before approval
 
 The Cloudflare destination has now been verified by the owner. The production `EMAIL` binding and sender remain unconfigured, and the Email Sending UI remains gated by Workers Paid. Apex Email Routing onboarding was canceled because it proposed replacing Microsoft MX records; no production mail DNS changes or paid upgrade were made. An API/subdomain-only free route is being investigated, but no functioning sender or free sending entitlement is established. Do not describe queued reports as delivered. Keep Microsoft’s existing MX/SPF/DKIM/DMARC and the public MTA-STS service intact. Actual owner inbox delivery remains a release gate.
 
@@ -104,15 +108,14 @@ The owner requested request IP, location and client/device information, then exp
 - Serve pixel GET and HEAD requests without an Access login, JavaScript challenge or bot CAPTCHA. Protect the endpoint through opaque tokens, validation and recording caps instead.
 - Cache-prevention headers passed the standard-user-agent public check. Confirm actual email clients and image proxies can retrieve a known image; the Python-default-user-agent edge denial is unresolved client-coverage evidence. Recipient proxies can still cache; these headers do not defeat privacy features.
 
-## 5. Configure optional email alerts
+## 5. Preserve the owner-only sender
 
-- Initial release can use the implemented in-app notification history. Native email alerts are not configured, and no owner inbox delivery has been verified.
-- This account’s current Email Sending onboarding UI requires Workers Paid. No upgrade was accepted; any paid service requires separate owner authorization. If sender setup is revisited, use a dedicated sending subdomain if supported by the actual onboarding flow and inspect every proposed DNS record before accepting it.
-- **Do not enable root Email Routing.** It is a different service that replaces MX and conflicts with the Microsoft mailbox.
-- Check that onboarding preserves existing root authentication policy and reporting endpoints. Add only the sender-authentication records that are actually required.
-- Add an `EMAIL` binding restricted to the verified owner destination. Configure `EMAIL_FROM` with an actually authenticated sender and `EMAIL_MODE=live` only for an approved sending test.
-- The code fixes the notification destination to `OWNER_EMAIL`; browser input cannot choose arbitrary recipients.
-- Test one owner alert. Check the received authentication results and actual inbox arrival. An API success is provider acceptance, not inbox verification.
+- Native report sending is configured and the controlled setup report reached the owner’s Inbox. The same transport is available for optional image-load alerts; their existing preference remains off, and this report test did not exercise a real image-load alert.
+- Keep the native binding restricted to `elijah@soluredigitalworks.com` and the configured From address `reports@notifications.soluredigitalworks.com`. Do not expand destinations into an arbitrary relay.
+- The verified-destination path worked with existing free services. The general Email Sending UI remains a different, Workers Paid-gated path; no upgrade is authorized by this setup.
+- Preserve the three notifications-subdomain MX records, its SPF TXT, and Cloudflare’s generated `cf2024-1` DKIM record. Keep Microsoft’s existing apex MX/SPF and DKIM selectors intact. Do not change them to resolve Cloudflare’s parent Routing mismatch notice.
+- The temporary setup key has been revoked and its local copy removed; ordinary Worker sending uses the native binding, not that key.
+- The controlled scheduled report was accepted once, and the owner confirmed Inbox arrival. Its received authentication headers were not inspected. Do not infer SPF/DKIM/DMARC results or universal inbox placement from that one receipt.
 
 ## 6. Validate Outlook insertion
 
@@ -124,7 +127,7 @@ The owner requested request IP, location and client/device information, then exp
 
 ## 7. Release, observe and recover
 
-- Keep the reviewed production configuration and dated verification evidence in source control. The deployed versions, two attached domains, synthetic capture and authenticated owner workflow are recorded above; Outlook sending and inbox delivery remain separate gates.
+- Keep the reviewed production configuration and dated verification evidence in source control. The deployed versions, two attached domains, synthetic capture and authenticated owner workflow are recorded above; Actual Outlook image insertion and optional image-load-alert Inbox receipt remain separate gates; scheduled report receipt is confirmed above.
 - Repeat owner sign-in, persistence, settings, notifications and actual-hostname pixel checks after future releases. Verify scheduled retention across its time boundary; the observed 90-day setting alone does not prove it ran.
 - Add account usage alerts and review spending-control availability before assuming a fixed cost ceiling. Ordinary usage is expected to be small; public request abuse can consume quota.
 - Monitor failed notification states and database usage. Avoid request-body logs and unnecessary retention of tracking URLs or private labels.
