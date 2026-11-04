@@ -1,5 +1,20 @@
 # Verification record
 
+## Tracking activation correction — November 4, 2026
+
+Local implementation is verified; source publication, remote migration, deployment and live acceptance remain pending at this checkpoint. The previous inactive-capture and separate email-priming behavior is superseded by the new contract in the implementation plan.
+
+- `node node_modules/vitest/vitest.mjs run`: **91/91** passed across three files, including inactive GIF/PNG capture, explicit atomic activation, concurrent first loads, restart/canceled queues, clear-history eligibility/cooldown, stale save/state races, sender failures, populated migration and retained report/retention coverage.
+- `node node_modules/typescript/bin/tsc --noEmit`, `node node_modules/vite/bin/vite.js build` and `git diff --check`: passed using the installed Node 24.22.1 toolchain.
+- `node node_modules/wrangler/bin/wrangler.js deploy --dry-run --config wrangler.dashboard.jsonc --outdir dist/dashboard-worker`: passed, 78.13 KiB / 20.32 KiB gzip. Equivalent pixel-config dry run passed, 11.41 KiB / 6.13 KiB gzip. These checks did not deploy.
+- Busy scheduled report-plus-load-alert processing measured **45 D1 calls**, below the existing 50-call budget assertion. No paid-service or limit change.
+- A private production export was restored to a disposable SQLite copy and `0006_tracking_activation.sql` applied. All original columns/rows remained unchanged: six pixels, 20 events, three disabled notifications, one report and existing settings. The current active pixel received an activation identity; the email master stayed off. Foreign-key check found no violations. The same migration was applied only to the local browser-test database at this checkpoint.
+- Browser workflow: inactive copy plus GIF/PNG GETs kept the new test record at zero. One Start action enabled tracking and email readiness; two concurrent format requests made two events and one pending notification. Stop preserved those events, disabled the queued notification and blocked subsequent GIF/PNG recording. Restart showed no notification until one new GET created the next activation’s pending notification; old disabled rows stayed disabled.
+- Actual interface inspected at 320/390 CSS-pixel widths without horizontal overflow. The large start control fits both. This is responsive browser inspection, not a physical iPhone email-insertion test.
+- Independent source review found no material issue in the inspected migration, atomic capture/save/activation logic, notification scoping or queue-cancellation guards. It does not establish an exhaustive security audit or inbox receipt.
+
+The public collector still returns a harmless image when inactive. Historical early loads remain saved and explicitly labeled. Stop can cancel unaccepted queued work, but an email-provider call already begun may finish. Reports after 89 days remain independent of tracking and load-email switches. Actual Outlook insertion and recipient proxy behavior remain separately unverified.
+
 ## Tracked-logo production verification — November 4, 2026
 
 Published implementation `9625020be92a7964d15851e7518aedc597ec3e8a` passed [CI run 41816250074](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41816250074). The public image Worker was deployed before the dashboard. Live integration then found that the production dashboard CSP blocked its new remote preview, a condition absent from Vite development. Correction `bcb9362af63cf844014633152261243fd28c8ef1`, tree `fe41a0efc0e39240991831ebf9763fde6c6ca6d7`, adds only the exact untracked PNG URL to `img-src`; scripts, connections, framing and tracked-image routes retain their previous restrictions. Its new production-authenticated HTML regression passed in the full **79/79** suite, TypeScript, dashboard dry-run bundle (75.02 KiB / 19.83 KiB gzip), independent review and [CI run 41817500132](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41817500132). The corrected dashboard is deployed; internal deployment identifiers are retained privately.

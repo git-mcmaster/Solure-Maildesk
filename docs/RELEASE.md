@@ -2,6 +2,14 @@
 
 This runbook separates confirmed setup from remaining release checks. The owner authorized implementation and deployment; completion still requires the evidence below. Keep the current Microsoft MX, SPF, DKIM, DMARC and public MTA-STS service intact.
 
+## Tracking activation correction — November 4, 2026
+
+Implementation and release are in progress. The intended contract is active-only capture, one visible start-and-email action, stop without new capture, first new load per activation and no old-load replay. This supersedes earlier documentation that described capture before arming or while paused. Earlier saved activity is preserved and labeled historical.
+
+The additive activation migration requires a private production export, disposable rehearsal and count/preference comparisons before application. Apply the migration and deploy the corrected image collector and dashboard/dispatcher promptly; the prior collector can still capture inactive loads in the migration-to-deployment interval. Existing sender/DNS, Access, free plan and 89-day report/retention safeguards stay in place. This is not a database rollback workflow: use corrected code retaining the new capture and queue guards, because older code can violate the inactive contract even if it can read the new schema. A database restore would replace newer records and needs separate approval.
+
+Live acceptance checks must prove both GIF and logo requests do not record while inactive; one explicit start turns on capture and email readiness; concurrent first loads produce one notification; stop blocks new recording and unaccepted queued work; restart waits for a new load rather than replaying old history. A provider call already under way may complete after Stop and cannot be recalled. Use a clearly labeled controlled record, preserve real records, and distinguish provider acceptance from the owner’s inbox confirmation.
+
 ## Tracked-logo release checkpoint — November 4, 2026
 
 The signature extension is published and deployed. Implementation commit `9625020be92a7964d15851e7518aedc597ec3e8a` passed CI; the production-only preview CSP correction is `bcb9362af63cf844014633152261243fd28c8ef1`, tree `fe41a0efc0e39240991831ebf9763fde6c6ca6d7`, with passing [CI run 41817500132](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41817500132). The exact tree matches the local reviewed source. Controlled live preview, rich clipboard, HEAD and one recorded logo GET passed. It adds a per-message PNG logo using the existing image-capture behavior and a separate untracked preview asset. The signature contains readable contact text and one tracked logo; the invisible GIF remains an alternative. Existing report dispatch, permanent loaded history, preservation controls, request-detail collection and capture caps remain unchanged. No DNS, database migration, dependency, service or paid plan change is needed.

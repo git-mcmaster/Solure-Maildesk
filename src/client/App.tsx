@@ -120,9 +120,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body.data as T;
 }
 const statusNames: Record<PixelStatus, string> = {
-  draft: "Awaiting send",
-  armed: "Alerts enabled",
-  paused: "Paused",
+  draft: "Inactive",
+  armed: "Active",
+  paused: "Inactive",
   archived: "Archived",
 };
 const deliveryNames: Record<string, string> = {
@@ -665,7 +665,7 @@ export default function App() {
       await loadList();
       choose(pixel);
       setToast(
-        "Pixel created. Copy it into your message, then return to label it.",
+        "Pixel created inactive. Prepare your email with tracking off, then start immediately before you press Send.",
       );
       window.setTimeout(
         () =>
@@ -677,12 +677,18 @@ export default function App() {
       );
     });
   }
-  async function updatePixel(status?: PixelStatus) {
+  async function updatePixel(status?: PixelStatus, enableEmailAlerts = false) {
     if (!selected) return;
     await action(status || "save", async () => {
       const pixel = await request<Pixel>(`/api/pixels/${selected.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ ...draft, ...(status ? { status } : {}) }),
+        body: JSON.stringify({
+          ...(draft.label !== selected.label ? { label: draft.label } : {}),
+          ...(draft.recipient !== selected.recipient ? { recipient: draft.recipient } : {}),
+          ...(draft.notes !== selected.notes ? { notes: draft.notes } : {}),
+          ...(status ? { status } : {}),
+          ...(enableEmailAlerts ? { enableEmailAlerts: true } : {}),
+        }),
       });
       setSelectedRecord(pixel);
       await load();
@@ -694,11 +700,11 @@ export default function App() {
       });
       setToast(
         status === "armed"
-          ? "Activity recording is active. First-load alerts are once per message unless repeat alerts are enabled."
+          ? "Tracking is active and email alerts are on. The first new image load after this start can email you."
           : status === "paused"
-            ? "Alerts paused."
+            ? "Tracking stopped. New image loads won’t be saved or create load emails. Your history is kept."
             : status === "archived"
-              ? "Message archived."
+              ? "Message archived. Tracking is off and your history is kept."
               : "Message details saved.",
       );
     });
@@ -706,6 +712,9 @@ export default function App() {
   async function copyPixel(rich: boolean) {
     if (!selected || !data) return;
     const { html, plainText } = emailContent(selected.pixelUrl, data.ownerEmail, emailFormat);
+    const trackingNotice = selected.status === "armed"
+      ? "Tracking is active. Composer previews or scanners may be the first recorded load. "
+      : "Tracking stays off while you prepare. Start when ready to send. ";
     try {
       if (rich && "ClipboardItem" in window && navigator.clipboard?.write) {
         await navigator.clipboard.write([
@@ -715,14 +724,14 @@ export default function App() {
           }),
         ]);
         setCopyNotice(
-          emailFormat === "signature"
+          trackingNotice + (emailFormat === "signature"
             ? "Signature copied with one message-specific logo image. If your app pastes only contact text, tracking was not inserted. Verify with a test email."
-            : "Rich HTML copied. Outlook may still embed or remove the image—verify your insertion method with a test message.",
+            : "Rich HTML copied. Outlook may still embed or remove the image—verify your insertion method with a test message."),
         );
       } else {
         await navigator.clipboard.writeText(html);
         setCopyNotice(
-          "HTML source copied. Pasting source into a normal email body will not insert a tracking image. Use a client that supports HTML insertion.",
+          trackingNotice + "HTML source copied. Pasting source into a normal email body will not insert a tracking image. Use a client that supports HTML insertion.",
         );
       }
     } catch {
@@ -960,10 +969,10 @@ export default function App() {
               footnote="Created in your workspace"
             />
             <Stat
-              label="Alerts enabled"
+              label="Tracking active"
               value={data.stats.armed}
               icon="activity"
-              footnote="Messages marked for notifications"
+              footnote="Messages saving new image requests"
             />
             <Stat
               label="Images loaded"
@@ -995,9 +1004,9 @@ export default function App() {
               <div className="list-toolbar">
                 <div className="tabs" aria-label="Filter messages">
                   {[
-                    ["active", "Active"],
-                    ["draft", "Awaiting send"],
-                    ["armed", "Alerts on"],
+                    ["active", "Current"],
+                    ["armed", "Tracking on"],
+                    ["inactive", "Tracking off"],
                     ["all", "All"],
                   ].map(([value, title]) => (
                     <button
@@ -1174,13 +1183,64 @@ export default function App() {
                     <span />
                     {statusNames[selected.status]}
                   </div>
+                  <section className="tracking-control" data-active={selected.status === "armed"} aria-label="Tracking control">
+                    <div className="tracking-control-heading">
+                      <Icon name={selected.status === "armed" ? "activity" : "pause"} size={18} />
+                      <strong>{selected.status === "armed" ? "Tracking is on" : "Tracking is off"}</strong>
+                    </div>
+                    <p>
+                      {selected.status === "armed"
+                        ? data.settings.emailEnabled
+                          ? "New image loads are saved. The first new load after each start can email you."
+                          : "New image loads are saved, but image-load emails are paused for all messages."
+                        : selected.status === "archived"
+                          ? "This message is archived. Restore it as inactive to start tracking again."
+                          : "Images display normally, but no new loads or request details are saved. No new load emails are created."}
+                    </p>
+                    {selected.status !== "archived" && (
+                      <>
+                        {!data.settings.emailEnabled && data.notificationConfigured && (
+                          <p className="tracking-control-note">Starting also resumes email alerts for your other active messages. Their next new loads can email you too.</p>
+                        )}
+                        {(selected.status !== "armed" || !data.settings.emailEnabled) && (
+                          <button
+                            className="button primary full-width"
+                            onClick={() => void updatePixel("armed", true)}
+                            disabled={!!busy || offline || !data.notificationConfigured}
+                          >
+                            <Icon name="activity" size={17} />
+                            {busy === "armed" ? "Starting…" : selected.status === "armed" ? "Resume email alerts" : "Start tracking & email me"}
+                          </button>
+                        )}
+                        {selected.status === "armed" && (
+                          <button className={`button ${data.settings.emailEnabled ? "primary" : "secondary"} full-width`} onClick={() => void updatePixel("paused")} disabled={!!busy || offline}>
+                            <Icon name="pause" size={17} /> {busy === "paused" ? "Stopping…" : "Stop tracking"}
+                          </button>
+                        )}
+                        {!data.notificationConfigured && <p className="tracking-control-note">Email sending needs configuration before tracking and email alerts can start.</p>}
+                        {selected.status === "armed" && (
+                          <p className="tracking-control-note">
+                            {selected.notificationStatus === "none"
+                              ? selected.activationAlertAt
+                                ? "A load email was already recorded for this start; its notification details are no longer available."
+                                : "Waiting for the first new load since this start."
+                              : `Load email this start: ${deliveryNames[selected.notificationStatus] || selected.notificationStatus}.`}
+                            {selected.armedAt ? ` Started ${formatDate(selected.armedAt)}.` : ""}
+                            {data.settings.repeatAlerts ? " Repeat-load alerts are also on." : " Later loads stay in the history without another email until a new tracking session starts."}
+                          </p>
+                        )}
+                      </>
+                    )}
+                    <p className="tracking-control-note">Copying doesn’t start tracking. Start when ready to send; previews after starting can still count.</p>
+                  </section>
                   <div className="workflow-step">
                     <span className="step-number">1</span>
                     <div>
                       <h3>Add your signature or tracking image</h3>
                       <p>
                         Use a fresh message-specific image for each email.
-                        Copy it into Outlook, then send as usual.
+                        Prepare and paste while tracking is off. Start tracking
+                        immediately before you press Send.
                       </p>
                     </div>
                   </div>
@@ -1229,7 +1289,7 @@ export default function App() {
                         </div>
                       </div>
                       <p className="signature-note">
-                        The logo records image requests for this message. There’s
+                        While tracking is on, the logo records image requests for this message. There’s
                         no extra hidden pixel. This preview is untracked—use the
                         copy button to get your message’s unique image.
                       </p>
@@ -1295,7 +1355,7 @@ export default function App() {
                   <div className="workflow-step">
                     <span className="step-number">2</span>
                     <div>
-                      <h3>Send, then add your context</h3>
+                      <h3>Add your private context</h3>
                       <p>Labels stay private. You can update them anytime.</p>
                     </div>
                   </div>
@@ -1404,36 +1464,6 @@ export default function App() {
                       {pixelReport ? "View report" : "Browse reports"} <Icon name="arrow" size={14} />
                     </button>
                   </section>
-                  {selected.status !== "archived" && (
-                    <button
-                      className="button primary full-width arm-button"
-                      onClick={() =>
-                        void updatePixel(
-                          selected.status === "armed" ? "paused" : "armed",
-                        )
-                      }
-                      disabled={!!busy || offline}
-                    >
-                      <Icon
-                        name={selected.status === "armed" ? "pause" : "check"}
-                      />
-                      {busy === "armed" || busy === "paused"
-                        ? "Updating…"
-                        : selected.status === "armed"
-                          ? "Pause alerts"
-                          : selected.status === "paused"
-                            ? "Resume alerts"
-                            : "Sent — enable alerts"}
-                    </button>
-                  )}
-                  <p className="quiet-note">
-                    {selected.armedAt
-                      ? `Last enabled ${formatDate(selected.armedAt)}.`
-                      : "Loads before you enable alerts stay in the activity history."}{" "}
-                    {selected.notificationStatus === "none" && selected.firstAlertAt
-                      ? "A first-load notification was already recorded; its detailed history was cleared or removed under an earlier retention policy."
-                      : `Email: ${deliveryNames[selected.notificationStatus]}.`}
-                  </p>
                   <div className="detail-divider" />
                   <div className="timeline-heading">
                     <h3>
@@ -1461,7 +1491,7 @@ export default function App() {
                   {!eventsLoading && !eventsError && events.length === 0 && (
                     <div className="timeline-empty">
                       <span className="live-dot" />
-                      <p>No image requests recorded yet.</p>
+                      <p>{selected.status === "armed" ? "No image requests recorded yet." : "No saved requests. Tracking is off."}</p>
                     </div>
                   )}
                   <ol className="timeline">
@@ -1487,7 +1517,7 @@ export default function App() {
                           <p className="event-summary event-unavailable">Location and device details weren’t collected for this load.</p>
                         )}
                         {event.phase === "before_arming" && (
-                          <small>While alerts were off</small>
+                          <small>Recorded before activation — earlier behavior</small>
                         )}
                         <RequestDetails metadata={event.metadata} />
                       </li>
@@ -1526,7 +1556,7 @@ export default function App() {
                         disabled={!!busy || offline}
                         onClick={() => void updatePixel("paused")}
                       >
-                        Restore as paused
+                        Restore as inactive
                       </button>
                     )}
                     <button
@@ -1561,22 +1591,22 @@ export default function App() {
                       <li>
                         <span>01</span>
                         <div>
-                          <strong>Create your pixel</strong>
-                          <p>A unique image for one message.</p>
+                          <strong>Prepare your email</strong>
+                          <p>Copy a fresh signature or pixel while tracking is off.</p>
                         </div>
                       </li>
                       <li>
                         <span>02</span>
                         <div>
-                          <strong>Add it and send</strong>
-                          <p>Use a verified insertion method.</p>
+                          <strong>Start, then press Send</strong>
+                          <p>Start tracking immediately before sending.</p>
                         </div>
                       </li>
                       <li>
                         <span>03</span>
                         <div>
-                          <strong>Label and enable alerts</strong>
-                          <p>Come back when you’re ready.</p>
+                          <strong>Review your activity</strong>
+                          <p>Stop tracking when finished. Your saved history stays.</p>
                         </div>
                       </li>
                     </ol>
@@ -1625,17 +1655,18 @@ export default function App() {
           <div className="dialog-body prose">
             <p>
               Each message has its own remote image: a signature logo or a
-              transparent pixel. A request for that image creates an activity
+              transparent pixel. While tracking is active, a request creates an activity
               event. Your message label,
               recipient and notes stay in your private workspace.
             </p>
             <h3>Test your Outlook insertion method first</h3>
             <ol>
               <li>
-                Create a pixel, choose its email format and use “Copy for Outlook,” or insert its HTML
+                Create a pixel, choose its email format and prepare your email
+                while tracking is off. Use “Copy for Outlook,” or insert its HTML
                 through a client that supports HTML insertion.
               </li>
-              <li>Send a test message to an inbox you control.</li>
+              <li>Return to Maildesk and click “Start tracking & email me” immediately before you press Send in Outlook. Send this test to an inbox you control.</li>
               <li>
                 Inspect the received message source. Its image must still
                 reference the pixel’s HTTPS address, rather than an embedded
@@ -1647,6 +1678,28 @@ export default function App() {
               Normal image insertion can embed the file. A pasted URL or pasted
               HTML source alone is not a tracking image. Outlook on iPhone
               remains unverified until this test passes.
+            </p>
+            <h3>Active means recording; inactive means off</h3>
+            <p>
+              New messages start inactive. Copying never starts tracking. Inactive,
+              stopped and archived messages display the image normally but save
+              no new requests or request details and create no new load emails.
+              Existing history stays saved. Older pre-activation activity is
+              labeled as earlier behavior.
+            </p>
+            <p>
+              “Start tracking & email me” activates recording and image-load
+              emails together. The first new load after each start can email
+              you, even after a stop and restart. Starting also resumes the
+              global email preference for other active messages. “Stop tracking”
+              stops recording and new load emails; an email already being
+              delivered can still arrive. The separate 89-day report remains scheduled.
+            </p>
+            <p>
+              Maildesk doesn’t control Outlook’s Send button, so switching apps
+              is manual. Once tracking is active, your own email composer, a preview or a
+              security scanner can be the first image load. That load can trigger
+              the first email; it does not identify the recipient.
             </p>
             <p>
               Copy a fresh tracked signature for every message. Saving one as
@@ -1668,7 +1721,7 @@ export default function App() {
             </p>
             <h3>Optional request details</h3>
             <p>
-              By default, image loads record activity times without request
+              By default, active image loads record activity times without request
               details. In preferences, you can choose to save the request IP,
               approximate location, network, and reported device and client for
               future loads. Expand “Request details” in the activity history to
@@ -1707,9 +1760,10 @@ export default function App() {
             </p>
             <h3>After sending</h3>
             <p>
-              Return here to label the pixel and enable alerts. Earlier loads
-              remain visible, but do not generate alerts. You may miss an early
-              recipient request during that interval.
+              Return here to review saved requests or update the private label.
+              Keep tracking active while you want new activity recorded. Stop it
+              when you’re finished; the existing history stays here. Loads that
+              happen while tracking is off are not saved or backfilled.
             </p>
           </div>
           <div className="dialog-footer">
@@ -1746,16 +1800,16 @@ export default function App() {
             <div className="dialog-body">
               <div className="setting-row">
                 <div>
-                  <strong>Image-load email alerts</strong>
+                  <strong>Image-load emails for all active messages</strong>
                   <p>
                     {data.development
                       ? "Simulate email alerts locally. No email is sent."
-                      : `Send activity alerts to ${data.ownerEmail}.`}
+                      : `Send load emails to ${data.ownerEmail}. Turning this off pauses emails, while active messages keep recording. Starting tracking resumes these emails.`}
                   </p>
                 </div>
                 <input
                   type="checkbox"
-                  aria-label="Enable email notifications"
+                  aria-label="Enable image-load emails for all active messages"
                   checked={settingsDraft.emailEnabled}
                   disabled={!data.notificationConfigured}
                   onChange={(event) =>
@@ -1791,8 +1845,8 @@ export default function App() {
                 <div>
                   <strong>Repeat alerts</strong>
                   <p>
-                    Allow later requests to notify you again, subject to a
-                    cooldown.
+                    After the first load email in each tracking session,
+                    allow another at most once per hour.
                   </p>
                 </div>
                 <input
@@ -1982,7 +2036,7 @@ export default function App() {
                 <Icon name="bell" size={30} />
                 <h3>You’re all caught up.</h3>
                 <p>
-                  When an armed pixel loads, its notification will appear here.
+                  When an active message’s image loads, its notification will appear here.
                 </p>
               </div>
             ) : (

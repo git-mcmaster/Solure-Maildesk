@@ -26,7 +26,7 @@ async function applyMigration(DB: D1Database, file: string) {
 }
 
 beforeAll(async () => {
-  mf = new Miniflare({ modules: true, script: 'export default { fetch() { return new Response("test"); } };', compatibilityDate: '2026-07-30', d1Databases: { DB: 'maildesk-unit-tests', LEGACY_DB: 'maildesk-migration-tests', REPORT_UPGRADE_DB: 'maildesk-report-upgrade-tests' } });
+  mf = new Miniflare({ modules: true, script: 'export default { fetch() { return new Response("test"); } };', compatibilityDate: '2026-07-30', d1Databases: { DB: 'maildesk-unit-tests', LEGACY_DB: 'maildesk-migration-tests', REPORT_UPGRADE_DB: 'maildesk-report-upgrade-tests', ACTIVATION_UPGRADE_DB: 'maildesk-activation-upgrade-tests' } });
   const DB = await mf.getD1Database('DB') as unknown as D1Database;
   for (const file of (await readdir(migrations)).filter((name) => name.endsWith('.sql')).sort()) {
     await applyMigration(DB, file);
@@ -51,6 +51,7 @@ async function api<T = unknown>(path: string, method = 'GET', body?: unknown, ov
 async function create(label = 'A proposal'): Promise<Pixel> { return (await api<Pixel>('/api/pixels', 'POST', { label })).data; }
 async function load(pixel: Pixel) { return fetchPixel(new Request(pixel.pixelUrl), env); }
 async function arm(pixel: Pixel) { return api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'armed' }); }
+async function start(pixel: Pixel) { return api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'armed', enableEmailAlerts: true }); }
 
 function detailedRequest(pixel: Pixel, method = 'GET') {
   const request = new Request(pixel.pixelUrl, { method, headers: { 'CF-Connecting-IP': '198.51.100.23', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/130.0' } });
@@ -199,6 +200,7 @@ describe('image requests and manual labeling', () => {
 
   it('keeps tracked logo responses identical for known, unknown, archived, deleted and unavailable storage', async () => {
     const pixel = await create('Private label must not leak');
+    await arm(pixel);
     const requestUrl = logoUrl(pixel);
     const known = await fetchPixel(new Request(requestUrl), env);
     const expectedBytes = await known.arrayBuffer();
@@ -249,14 +251,14 @@ describe('image requests and manual labeling', () => {
     const pixel = await create();
     await api('/api/settings', 'PATCH', { captureRequestDetails: true, emailEnabled: true });
     await fetchPixel(detailedRequest({ ...pixel, pixelUrl: logoUrl(pixel) }), env);
-    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data).toMatchObject({ loadCount: 1, earlyLoadCount: 1, hasRecordedLoad: true, notificationStatus: 'none' });
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data).toMatchObject({ loadCount: 0, earlyLoadCount: 0, hasRecordedLoad: false, notificationStatus: 'none' });
     await arm(pixel);
     await Promise.all(Array.from({ length: 10 }, (_, index) => fetchPixel(detailedRequest(index % 2 ? pixel : { ...pixel, pixelUrl: logoUrl(pixel) }), env)));
     const saved = (await api<Pixel>(`/api/pixels/${pixel.id}`)).data;
     const events = (await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data;
-    expect(saved).toMatchObject({ loadCount: 11, earlyLoadCount: 1, hasRecordedLoad: true, notificationStatus: 'pending' });
-    expect(events).toHaveLength(11);
-    expect(events.filter((event) => event.phase === 'before_arming')).toHaveLength(1);
+    expect(saved).toMatchObject({ loadCount: 10, earlyLoadCount: 0, hasRecordedLoad: true, notificationStatus: 'pending' });
+    expect(events).toHaveLength(10);
+    expect(events.filter((event) => event.phase === 'before_arming')).toHaveLength(0);
     expect(events.filter((event) => event.phase === 'after_arming')).toHaveLength(10);
     expect(events.every((event) => event.metadata?.requestIp === '198.51.100.23')).toBe(true);
     expect((await api<Bootstrap>('/api/bootstrap')).data.notifications).toHaveLength(1);
@@ -264,24 +266,29 @@ describe('image requests and manual labeling', () => {
 
   it('applies one atomic per-pixel and account cap to mixed logo and GIF requests', async () => {
     const pixel = await create();
+    await arm(pixel);
     const now = new Date().toISOString();
     await env.DB.batch(Array.from({ length: 199 }, () => env.DB.prepare("INSERT INTO events (id,pixel_id,created_at,phase) VALUES (?,?,?,'before_arming')").bind(crypto.randomUUID(), pixel.id, now)));
     await Promise.all(Array.from({ length: 10 }, (_, index) => fetchPixel(new Request(index % 2 ? pixel.pixelUrl : logoUrl(pixel)), env)));
     expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data.loadCount).toBe(200);
     expect(await env.DB.prepare('SELECT event_count FROM settings WHERE id=1').first('event_count')).toBe(200);
     const other = await create();
+    await arm(other);
     await env.DB.prepare('UPDATE settings SET event_count=9999 WHERE id=1').run();
     await Promise.all(Array.from({ length: 10 }, (_, index) => fetchPixel(new Request(index % 2 ? other.pixelUrl : logoUrl(other)), env)));
     expect((await api<Pixel>(`/api/pixels/${other.id}`)).data.loadCount).toBe(1);
     expect(await env.DB.prepare('SELECT event_count FROM settings WHERE id=1').first('event_count')).toBe(10000);
   });
 
-  it('records early loads without notifying and preserves events when labeled afterward', async () => {
+  it('keeps new pixels inactive until started and preserves captured events when labeled afterward', async () => {
     const pixel = await create();
     await load(pixel);
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data).toEqual([]);
+    await start(pixel);
+    await load(pixel);
     const changed = await api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { label: 'Website proposal', recipient: 'client@example.com' });
-    expect(changed.data).toMatchObject({ label: 'Website proposal', loadCount: 1, earlyLoadCount: 1, notificationStatus: 'none' });
-    expect((await api<{ phase: string }[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.phase).toBe('before_arming');
+    expect(changed.data).toMatchObject({ label: 'Website proposal', loadCount: 1, earlyLoadCount: 0, notificationStatus: 'pending', status: 'armed' });
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.phase).toBe('after_arming');
   });
 
   it('creates exactly one first-load outbox item under concurrent requests', async () => {
@@ -329,6 +336,7 @@ describe('image requests and manual labeling', () => {
 
   it('caps stored requests per pixel per day', async () => {
     const pixel = await create();
+    await arm(pixel);
     const now = new Date().toISOString();
     await env.DB.batch(Array.from({ length: 200 }, () => env.DB.prepare("INSERT INTO events (id,pixel_id,created_at,phase) VALUES (?,?,?,'before_arming')").bind(crypto.randomUUID(), pixel.id, now)));
     await load(pixel);
@@ -337,6 +345,7 @@ describe('image requests and manual labeling', () => {
 
   it('keeps daily caps atomic under concurrent requests and resets them on a new day', async () => {
     const pixel = await create();
+    await arm(pixel);
     const now = new Date().toISOString();
     await env.DB.batch(Array.from({ length: 199 }, () => env.DB.prepare("INSERT INTO events (id,pixel_id,created_at,phase) VALUES (?,?,?,'before_arming')").bind(crypto.randomUUID(), pixel.id, now)));
     await Promise.all(Array.from({ length: 8 }, () => load(pixel)));
@@ -461,6 +470,7 @@ describe('optional private request details', () => {
     expect((await api<Settings>('/api/settings')).data.captureRequestDetails).toBe(false);
     for (const value of ['true', 1, null, {}]) expect((await api('/api/settings', 'PATCH', { captureRequestDetails: value })).response.status).toBe(400);
     const pixel = await create();
+    await arm(pixel);
     await fetchPixel(detailedRequest(pixel), env);
     expect(await env.DB.prepare('SELECT request_metadata FROM events WHERE pixel_id=?').bind(pixel.id).first('request_metadata')).toBeNull();
     expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.metadata).toBeNull();
@@ -479,6 +489,7 @@ describe('optional private request details', () => {
 
   it('never exposes stored details through the public image response or an unauthenticated events API', async () => {
     const pixel = await create();
+    await arm(pixel);
     await api('/api/settings', 'PATCH', { captureRequestDetails: true });
     const known = await fetchPixel(detailedRequest(pixel), env);
     const unknown = await fetchPixel(detailedRequest({ ...pixel, pixelUrl: `${env.PIXEL_ORIGIN}/p/${'0'.repeat(32)}.gif` }), env);
@@ -502,6 +513,7 @@ describe('optional private request details', () => {
 
   it('rechecks capture atomically so disabling during a request stores no metadata', async () => {
     const pixel = await create();
+    await arm(pixel);
     await api('/api/settings', 'PATCH', { captureRequestDetails: true });
     const DB = { prepare(sql: string) {
       if (sql === 'SELECT capture_request_details FROM settings WHERE id=1') return { async first() {
@@ -521,12 +533,8 @@ describe('optional private request details', () => {
     let release!: () => void;
     const waiting = new Promise<void>((resolve) => { entered = resolve; });
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    const DB = { prepare(sql: string) {
-      const statement = env.DB.prepare(sql);
-      if (sql.startsWith('UPDATE settings SET')) return { bind(...values: unknown[]) {
-        return { async run() { entered(); await gate; return statement.bind(...values).run(); } } as unknown as D1PreparedStatement;
-      } } as unknown as D1PreparedStatement;
-      return statement;
+    const DB = { prepare: (sql: string) => env.DB.prepare(sql), async batch(statements: D1PreparedStatement[]) {
+      entered(); await gate; return env.DB.batch(statements);
     } } as unknown as D1Database;
     const retentionSave = api<Settings>('/api/settings', 'PATCH', { retentionDays: 30 }, { DB });
     await waiting;
@@ -538,6 +546,7 @@ describe('optional private request details', () => {
 
   it('serves old events with null details and treats corrupted stored metadata as unavailable', async () => {
     const pixel = await create();
+    await arm(pixel);
     const now = new Date().toISOString();
     await env.DB.prepare("INSERT INTO events (id,pixel_id,created_at,phase) VALUES (?,?,?,'before_arming')").bind(crypto.randomUUID(), pixel.id, now).run();
     expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.metadata).toBeNull();
@@ -547,6 +556,7 @@ describe('optional private request details', () => {
 
   it('retains old metadata automatically and removes it only through explicit history clearing or deletion', async () => {
     const pixel = await create();
+    await arm(pixel);
     await api('/api/settings', 'PATCH', { captureRequestDetails: true });
     await fetchPixel(detailedRequest(pixel), env);
     await env.DB.prepare("UPDATE events SET created_at='2025-01-01T00:00:00.000Z'").run();
@@ -683,6 +693,7 @@ describe('permanent loaded history and unused pixel cleanup', () => {
 
   it('never makes a once-loaded pixel eligible after the owner clears all visible history', async () => {
     const pixel = await aged('Cleared but once loaded');
+    await arm(pixel);
     await load(pixel);
     await api(`/api/pixels/${pixel.id}/events`, 'DELETE');
     await env.DB.prepare('UPDATE pixels SET daily_load_count=0 WHERE id=?').bind(pixel.id).run();
@@ -701,6 +712,7 @@ describe('permanent loaded history and unused pixel cleanup', () => {
     }
     const eventOnly = await aged('Event only');
     pixels.push(eventOnly);
+    await arm(eventOnly);
     await load(eventOnly);
     await env.DB.prepare('UPDATE pixels SET has_recorded_load=0,load_count=0,early_load_count=0,daily_load_count=0,first_loaded_at=NULL,last_loaded_at=NULL,first_alert_at=NULL WHERE id=?').bind(eventOnly.id).run();
     const notificationOnly = await aged('Notification only');
@@ -730,6 +742,7 @@ describe('permanent loaded history and unused pixel cleanup', () => {
   it('serializes first-load capture against cleanup without deleting a committed load or resurrecting a deleted pixel', async () => {
     for (let index = 0; index < 12; index++) {
       const pixel = await aged(`First-load race ${index}`);
+      await arm(pixel);
       await sentReports();
       const [image] = await Promise.all([load(pixel), enforceRetention(env, cleanupAt)]);
       expect(image.status).toBe(200);
@@ -788,6 +801,7 @@ describe('89-day pixel reports', () => {
     await api(`/api/pixels/${due.id}`, 'PATCH', { recipient: 'recipient@example.com', notes: 'PRIVATE NOTE MUST NOT BE EMAILED' });
     await api(`/api/pixels/${archived.id}`, 'PATCH', { status: 'archived' });
     await api('/api/settings', 'PATCH', { captureRequestDetails: true });
+    await arm(loaded);
     await fetchPixel(detailedRequest(loaded), env);
     await api(`/api/pixels/${loaded.id}`, 'PATCH', { status: 'paused' });
     expect(await report(due)).toBeNull();
@@ -922,6 +936,7 @@ describe('89-day pixel reports', () => {
   it('sends before automatic cleanup and keeps the delivered snapshot after unused pixel deletion', async () => {
     const unused = await oldPixel(100, 'Report before deletion');
     const loaded = await oldPixel(100, 'Loaded permanently');
+    await arm(loaded);
     await load(loaded);
     const live = sender();
     await runScheduled(live, reportAt);
@@ -959,7 +974,7 @@ describe('89-day pixel reports', () => {
     } } as unknown as D1Database;
     const live = sender();
     await runScheduled({ ...live, DB }, reportAt);
-    expect(calls).toBe(40);
+    expect(calls).toBe(45);
     expect(calls).toBeLessThan(50);
     expect(live.EMAIL.send).toHaveBeenCalledTimes(10);
     expect((await api<ReportPage>('/api/reports')).data.items.filter((item) => item.status === 'sent')).toHaveLength(5);
@@ -1087,5 +1102,286 @@ describe('notification outbox and retention', () => {
     const retained = (await api<Pixel>(`/api/pixels/${pixel.id}`)).data;
     expect(retained.loadCount).toBe(2);
     expect(retained.firstAlertAt).not.toBeNull();
+  });
+});
+
+describe('explicit tracking activation', () => {
+  const logo = (pixel: Pixel) => ({ ...pixel, pixelUrl: pixel.pixelUrl.replace(/\.gif$/u, '/logo.png') });
+  async function state(pixel: Pixel) { return (await api<Pixel>(`/api/pixels/${pixel.id}`)).data; }
+
+  it('records neither inactive GIF nor logo requests, retains history, and spends no event quota while stopped', async () => {
+    const pixel = await create();
+    await api('/api/settings', 'PATCH', { captureRequestDetails: true });
+    for (const status of ['draft', 'paused', 'archived']) {
+      if (status !== 'draft') await api(`/api/pixels/${pixel.id}`, 'PATCH', { status });
+      for (const image of [pixel, logo(pixel)]) expect((await fetchPixel(detailedRequest(image), env)).status).toBe(200);
+      expect(await env.DB.prepare('SELECT event_count FROM settings WHERE id=1').first('event_count')).toBe(0);
+      expect((await state(pixel)).loadCount).toBe(0);
+    }
+    await start(pixel);
+    await fetchPixel(detailedRequest(logo(pixel)), env);
+    const captured = await state(pixel);
+    expect(captured).toMatchObject({ loadCount: 1, earlyLoadCount: 0, hasRecordedLoad: true, notificationStatus: 'pending' });
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.metadata?.requestIp).toBe('198.51.100.23');
+    await api(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'paused' });
+    for (const image of [pixel, logo(pixel)]) await fetchPixel(detailedRequest(image), env);
+    expect((await state(pixel)).loadCount).toBe(1);
+    expect(await env.DB.prepare('SELECT event_count FROM settings WHERE id=1').first('event_count')).toBe(1);
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications).toHaveLength(1);
+    expect((await state(pixel)).notificationStatus).toBe('disabled');
+  });
+
+  it('atomically starts tracking and emails, is idempotent while on, and alerts once again after a resume', async () => {
+    const pixel = await create();
+    const first = (await start(pixel)).data;
+    expect(first).toMatchObject({ status: 'armed', activationAlertAt: null, notificationStatus: 'none' });
+    expect(first.activationId).toBeTruthy();
+    expect((await api<Settings>('/api/settings')).data.emailEnabled).toBe(true);
+    await Promise.all(Array.from({ length: 8 }, (_, i) => load(i % 2 ? pixel : logo(pixel))));
+    const loaded = await state(pixel);
+    expect(loaded.activationAlertAt).toBeTruthy();
+    expect((await start(pixel)).data).toMatchObject({ activationId: first.activationId, activationAlertAt: loaded.activationAlertAt });
+    await dispatchNotifications(env);
+    await api(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'paused' });
+    const resumed = (await start(pixel)).data;
+    expect(resumed.activationId).not.toBe(first.activationId);
+    expect(resumed).toMatchObject({ activationAlertAt: null, firstAlertAt: loaded.firstAlertAt, notificationStatus: 'none', loadCount: 8 });
+    await Promise.all(Array.from({ length: 8 }, () => load(pixel)));
+    const notices = (await api<Bootstrap>('/api/bootstrap')).data.notifications;
+    expect(notices).toHaveLength(2);
+    expect(notices.map((item) => item.status).sort()).toEqual(['dry_run', 'pending']);
+    expect((await state(pixel)).firstAlertAt).toBe(loaded.firstAlertAt);
+    expect((await state(pixel)).notificationStatus).toBe('pending');
+  });
+
+  it('rejects an invalid or unconfigured one-step start without enabling anything', async () => {
+    const pixel = await create();
+    for (const body of [{ enableEmailAlerts: true }, { status: 'paused', enableEmailAlerts: true }, { status: 'armed', enableEmailAlerts: false }, { status: 'armed', enableEmailAlerts: 'true' }]) {
+      expect((await api(`/api/pixels/${pixel.id}`, 'PATCH', body)).response.status).toBe(400);
+    }
+    const result = await api(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'armed', enableEmailAlerts: true }, { EMAIL_MODE: 'live', EMAIL: undefined, EMAIL_FROM: undefined });
+    expect(result.response.status).toBe(409);
+    expect(await state(pixel)).toMatchObject({ status: 'draft', activationId: null, armedAt: null });
+    expect((await api<Settings>('/api/settings')).data.emailEnabled).toBe(false);
+  });
+
+  it('resumes all armed notification windows when the shared master is re-enabled, without replaying disabled alerts', async () => {
+    const a = await create('Target');
+    const b = await create('Other tracking message');
+    const off = await create('Paused message');
+    for (const pixel of [a, b, off]) { await arm(pixel); await load(pixel); }
+    await api(`/api/pixels/${off.id}`, 'PATCH', { status: 'paused' });
+    const original = await Promise.all([a, b, off].map(state));
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications.every((n) => n.status === 'disabled')).toBe(true);
+    await start(a);
+    const current = await Promise.all([a, b, off].map(state));
+    for (let i = 0; i < 2; i++) {
+      expect(current[i]!.activationId).not.toBe(original[i]!.activationId);
+      expect(current[i]!).toMatchObject({ activationAlertAt: null, notificationStatus: 'none', firstAlertAt: original[i]!.firstAlertAt });
+    }
+    expect(current[2]!.activationId).toBe(original[2]!.activationId);
+    expect(current[2]!.status).toBe('paused');
+    await dispatchNotifications(env);
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications.filter((n) => n.status === 'dry_run')).toHaveLength(0);
+    await Promise.all([load(a), load(b), load(off)]);
+    const notices = (await api<Bootstrap>('/api/bootstrap')).data.notifications;
+    expect(notices.filter((n) => n.status === 'pending')).toHaveLength(2);
+    expect(notices.filter((n) => n.status === 'disabled')).toHaveLength(3);
+  });
+
+  it('preserves live Start and Pause states when an earlier label-only save finishes afterward', async () => {
+    const pixel = await create();
+    for (const desired of ['armed', 'paused']) {
+      let entered!: () => void;
+      let release!: () => void;
+      const waiting = new Promise<void>((resolve) => { entered = resolve; });
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const DB = { prepare: (sql: string) => env.DB.prepare(sql), async batch(statements: D1PreparedStatement[]) {
+        entered(); await gate; return env.DB.batch(statements);
+      } } as unknown as D1Database;
+      const saving = api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { label: `Saved while ${desired}` }, { DB });
+      await waiting;
+      const changed = desired === 'armed' ? await start(pixel) : await api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { status: desired, notes: 'Latest notes' });
+      release();
+      expect((await saving).data).toMatchObject({ status: desired, activationId: changed.data.activationId, label: `Saved while ${desired}` });
+    }
+    expect((await state(pixel)).notes).toBe('Latest notes');
+  });
+
+  it('keeps a durable current-activation alert marker through Clear Activity and preserves the repeat cooldown', async () => {
+    const pixel = await create();
+    await start(pixel);
+    const insert = (at: string) => env.DB.prepare("INSERT INTO events(id,pixel_id,created_at,phase) VALUES(?,?,?,'after_arming')").bind(crypto.randomUUID(), pixel.id, at).run();
+    await insert('2026-11-04T12:00:00.000Z');
+    const first = await state(pixel);
+    await api(`/api/pixels/${pixel.id}/events`, 'DELETE');
+    expect(await state(pixel)).toMatchObject({ firstAlertAt: first.firstAlertAt, activationAlertAt: first.activationAlertAt, hasRecordedLoad: true, notificationStatus: 'none' });
+    await insert('2026-11-04T12:01:00.000Z');
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications).toHaveLength(0);
+    await api('/api/settings', 'PATCH', { repeatAlerts: true });
+    await insert('2026-11-04T12:59:59.999Z');
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications).toHaveLength(0);
+    await insert('2026-11-04T13:00:00.000Z');
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications).toHaveLength(1);
+    await api(`/api/pixels/${pixel.id}/events`, 'DELETE');
+    await insert('2026-11-04T13:00:01.000Z');
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications).toHaveLength(0);
+  });
+
+  it('lists draft and paused messages together as inactive without including tracking or archived records', async () => {
+    const draft = await create('Draft');
+    const paused = await create('Paused');
+    const active = await create('Tracking');
+    const archived = await create('Archived');
+    await api(`/api/pixels/${paused.id}`, 'PATCH', { status: 'paused' });
+    await start(active);
+    await api(`/api/pixels/${archived.id}`, 'PATCH', { status: 'archived' });
+    const page = await api<PixelPage>('/api/pixels?status=inactive');
+    expect(page.response.status).toBe(200);
+    expect(page.data.items.map((p) => p.id).sort()).toEqual([draft.id, paused.id].sort());
+    expect(page.data.total).toBe(2);
+    expect((await api<PixelPage>('/api/pixels?status=active')).data.total).toBe(3);
+  });
+
+  it('rechecks tracking at capture time and does not let stopping/restarting reset the daily quota', async () => {
+    const pixel = await create();
+    await start(pixel);
+    const DB = { prepare(sql: string) {
+      if (sql === 'SELECT capture_request_details FROM settings WHERE id=1') return { async first() {
+        await api(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'paused' }); return 1;
+      } } as unknown as D1PreparedStatement;
+      return env.DB.prepare(sql);
+    } } as unknown as D1Database;
+    await fetchPixel(detailedRequest(pixel), { ...env, DB });
+    expect((await state(pixel)).loadCount).toBe(0);
+    await start(pixel);
+    await env.DB.prepare('UPDATE pixels SET daily_load_count=200,daily_load_day=? WHERE id=?').bind(new Date().toISOString().slice(0, 10), pixel.id).run();
+    await api(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'paused' });
+    await start(pixel);
+    await load(pixel);
+    expect((await state(pixel)).loadCount).toBe(0);
+    expect(await env.DB.prepare('SELECT daily_load_count FROM pixels WHERE id=?').bind(pixel.id).first('daily_load_count')).toBe(200);
+  });
+});
+
+describe('notification cancellation races', () => {
+  function live(send = vi.fn(async () => ({ messageId: 'accepted' }))) { return { ...env, EMAIL_MODE: 'live' as const, EMAIL_FROM: 'alerts@notifications.soluredigitalworks.com', EMAIL: { send } }; }
+
+  it('rechecks Pause, master-off and restarted generation after claiming but before calling the provider', async () => {
+    for (const action of ['pause', 'master-off', 'restart']) {
+      const pixel = await create(action);
+      await start(pixel);
+      await load(pixel);
+      let intercepted = false;
+      const DB = { prepare(sql: string) {
+        const statement = env.DB.prepare(sql);
+        if (sql.startsWith('SELECT n.*,p.label FROM notifications')) return { bind(...args: unknown[]) { return { async first() {
+          const item = await statement.bind(...args).first();
+          if (!intercepted) {
+            intercepted = true;
+            if (action === 'master-off') await api('/api/settings', 'PATCH', { emailEnabled: false });
+            else { await api(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'paused' }); if (action === 'restart') await start(pixel); }
+          }
+          return item;
+        } } as unknown as D1PreparedStatement; } } as unknown as D1PreparedStatement;
+        return statement;
+      } } as unknown as D1Database;
+      const sender = live();
+      await dispatchNotifications({ ...sender, DB });
+      expect(intercepted).toBe(true);
+      expect(sender.EMAIL.send).not.toHaveBeenCalled();
+      const notice = await env.DB.prepare('SELECT status,lease_token FROM notifications WHERE pixel_id=?').bind(pixel.id).first();
+      expect(notice).toEqual({ status: 'disabled', lease_token: null });
+    }
+  });
+
+  it('records an already-started provider acceptance truthfully even if tracking is stopped during the call', async () => {
+    const pixel = await create();
+    await start(pixel); await load(pixel);
+    let entered!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const sender = live(vi.fn(async () => { entered(); await gate; return { messageId: 'accepted' }; }));
+    const dispatch = dispatchNotifications(sender);
+    await waiting;
+    await api(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'paused' });
+    const canceled = await env.DB.prepare('SELECT status,lease_token FROM notifications WHERE pixel_id=?').bind(pixel.id).first<{ status: string; lease_token: string | null }>();
+    expect(canceled?.status).toBe('disabled');
+    expect(canceled?.lease_token).toBeTruthy();
+    release(); await dispatch;
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications[0]?.status).toBe('sent');
+    expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data.status).toBe('paused');
+  });
+
+  it('never retries an already-started send that fails after the master was disabled', async () => {
+    const pixel = await create(); await start(pixel); await load(pixel);
+    let entered!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const sender = live(vi.fn(async () => { entered(); await gate; throw new Error('Private provider detail'); }));
+    const dispatch = dispatchNotifications(sender);
+    await waiting;
+    await api('/api/settings', 'PATCH', { emailEnabled: false });
+    release(); await dispatch;
+    const notice = (await api<Bootstrap>('/api/bootstrap')).data.notifications[0]!;
+    expect(notice).toMatchObject({ status: 'disabled', lastError: 'Email delivery failed after alerts were stopped. No retry is scheduled.' });
+    await api('/api/settings', 'PATCH', { emailEnabled: true });
+    await dispatchNotifications(sender, new Date(Date.now() + 600_000));
+    expect(sender.EMAIL.send).toHaveBeenCalledTimes(1);
+    expect((await api<Bootstrap>('/api/bootstrap')).data.notifications[0]?.status).toBe('disabled');
+  });
+});
+
+describe('tracking activation upgrade', () => {
+  it('preserves populated history and preferences, maps current queues, and cancels only stale or inactive undelivered queues', async () => {
+    const DB = await mf.getD1Database('ACTIVATION_UPGRADE_DB') as unknown as D1Database;
+    for (const file of ['0001_initial.sql', '0002_daily_counters.sql', '0003_request_details.sql', '0004_permanent_loaded_history.sql', '0005_pixel_reports.sql']) await applyMigration(DB, file);
+    const then = '2026-11-01T01:00:00.000Z';
+    const loadedAt = '2026-11-01T02:00:00.000Z';
+    const cases = [
+      ['active-pending', 'armed', 'pending'], ['active-failed', 'armed', 'failed'], ['active-sending', 'armed', 'sending'],
+      ['paused-pending', 'paused', 'pending'], ['archived-failed', 'archived', 'failed'], ['old-session', 'armed', 'pending'],
+      ['cleared-active', 'armed', null], ['never-loaded-active', 'armed', null],
+    ] as const;
+    for (let index = 0; index < cases.length; index++) {
+      const [id, status, notice] = cases[index]!;
+      await DB.prepare('INSERT INTO pixels(id,token,label,status,created_at,updated_at,armed_at,preserve_unloaded,notes) VALUES(?,?,?,?,?,?,?,1,?)')
+        .bind(id, index.toString(16).padStart(32, '0'), `Preserved ${id}`, status, then, then, then, 'Private preserved note').run();
+      if (id !== 'cleared-active' && id !== 'never-loaded-active') await DB.prepare("INSERT INTO events(id,pixel_id,created_at,phase,request_metadata) VALUES(?,?,?,'before_arming',?)")
+        .bind(`event-${id}`, id, loadedAt, JSON.stringify({ requestIp: '198.51.100.23' })).run();
+      if (id !== 'never-loaded-active') await DB.prepare('UPDATE pixels SET first_alert_at=? WHERE id=?').bind(loadedAt, id).run();
+      if (notice) await DB.prepare('INSERT INTO notifications(id,pixel_id,dedupe_key,created_at,status,attempts,next_attempt_at,lease_token,lease_until) VALUES(?,?,?,?,?,2,?,?,?)')
+        .bind(`notice-${id}`, id, `legacy:${id}`, id === 'old-session' ? '2026-10-01T00:00:00.000Z' : loadedAt, notice, loadedAt,
+          notice === 'sending' ? 'existing-provider-lease' : null, notice === 'sending' ? '2030-01-01T00:00:00.000Z' : null).run();
+    }
+    await DB.prepare('UPDATE settings SET email_enabled=0,repeat_alerts=1,capture_request_details=1,keep_unloaded_pixels=1,retention_days=180 WHERE id=1').run();
+    await queuePixelReports({ ...env, DB }, new Date('2027-03-01T00:00:00.000Z'));
+    const before = {
+      pixels: await DB.prepare('SELECT id,status,label,notes,first_alert_at,has_recorded_load,preserve_unloaded,load_count,daily_load_count FROM pixels ORDER BY id').all(),
+      events: await DB.prepare('SELECT * FROM events ORDER BY id').all(),
+      reports: await DB.prepare('SELECT * FROM pixel_reports ORDER BY id').all(),
+      settings: await DB.prepare('SELECT * FROM settings').first(),
+    };
+    await applyMigration(DB, '0006_tracking_activation.sql');
+    expect((await DB.prepare('SELECT id,status,label,notes,first_alert_at,has_recorded_load,preserve_unloaded,load_count,daily_load_count FROM pixels ORDER BY id').all()).results).toEqual(before.pixels.results);
+    expect((await DB.prepare('SELECT * FROM events ORDER BY id').all()).results).toEqual(before.events.results);
+    expect((await DB.prepare('SELECT * FROM pixel_reports ORDER BY id').all()).results).toEqual(before.reports.results);
+    expect(await DB.prepare('SELECT * FROM settings').first()).toEqual(before.settings);
+    for (const [id, status, notice] of cases) {
+      const row = await DB.prepare('SELECT activation_id,activation_alert_at,first_alert_at FROM pixels WHERE id=?').bind(id).first<{ activation_id: string | null; activation_alert_at: string | null; first_alert_at: string | null }>();
+      expect(Boolean(row!.activation_id)).toBe(status === 'armed');
+      if (status === 'armed' && id !== 'never-loaded-active') expect(row!.activation_alert_at).toBe(loadedAt);
+      if (!notice) continue;
+      const queue = await DB.prepare('SELECT activation_id,status,attempts,lease_token FROM notifications WHERE pixel_id=?').bind(id).first<{ activation_id: string | null; status: string; attempts: number; lease_token: string | null }>();
+      if (status === 'armed' && id !== 'old-session') {
+        expect(queue).toMatchObject({ activation_id: row!.activation_id, status: notice, attempts: 2 });
+        if (notice === 'sending') expect(queue!.lease_token).toBe('existing-provider-lease');
+      } else expect(queue).toMatchObject({ activation_id: null, status: 'disabled', attempts: 2 });
+    }
+    // Upgrade alone cannot reissue a first alert after the owner previously cleared it.
+    await DB.prepare("INSERT INTO events(id,pixel_id,created_at,phase) VALUES('after-upgrade','cleared-active',?,'after_arming')").bind('2026-11-01T02:01:00.000Z').run();
+    expect(await DB.prepare("SELECT COUNT(*) count FROM notifications WHERE pixel_id='cleared-active'").first('count')).toBe(0);
   });
 });

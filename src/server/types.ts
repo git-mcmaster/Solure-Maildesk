@@ -11,6 +11,8 @@ export interface Pixel {
   createdAt: string;
   updatedAt: string;
   armedAt: string | null;
+  activationId: string | null;
+  activationAlertAt: string | null;
   firstAlertAt: string | null;
   firstLoadedAt: string | null;
   lastLoadedAt: string | null;
@@ -138,6 +140,8 @@ export interface PixelRow {
   created_at: string;
   updated_at: string;
   armed_at: string | null;
+  activation_id: string | null;
+  activation_alert_at: string | null;
   first_alert_at: string | null;
   first_loaded_at: string | null;
   last_loaded_at: string | null;

@@ -2,6 +2,16 @@
 
 Status: approved scope for local implementation; production deployment, DNS, live email sending and tenant changes remain separate release steps. November 2, 2026.
 
+## Tracking and notification activation correction — November 4, 2026
+
+The owner reported that inactive pixels kept recording and that priming email alerts required too many steps. Confirmed causes were the public collector excluding only archived pixels, a separate global email preference left off by activation, and lifetime notification eligibility being consumed even when mail was disabled. This correction is in progress; release and production verification remain pending.
+
+Define inactive draft/paused/archived records as no new event capture, quota consumption or notification creation. Continue serving their harmless image so stopping tracking does not break an already-sent signature. Existing activity remains historical; earlier pre-activation events are explicitly labeled as the earlier behavior. Active capture, both PNG and GIF, uses the same atomic status gate and limits.
+
+Provide a prominent “Start tracking & email me” action that saves current details, validates the sender, activates tracking and resumes the existing workspace email switch atomically. Disclose that resuming this master switch also resumes future alerts for other active messages. “Stop tracking” stops new recording and unaccepted queued alerts; it cannot recall a provider call already begun. A first new load after each explicit restart may notify again, with optional repeats no more than once per rolling hour. Do not replay old loads. Copying never activates tracking.
+
+Use an additive migration for activation identity and durable notification eligibility. Preserve loaded history, saved reports, preferences and first-ever markers; clearing history must not re-enable the same activation’s first alert or reset its cooldown. Save-details requests must preserve lifecycle changes made concurrently. Rehearse migration on disposable data and take a private production export before rollout. Recovery uses corrected code retaining activation guards; restoring a database would replace newer data and requires separate approval. No DNS, access, paid-plan or sender changes are required.
+
 ## Tracked-logo signature extension — November 4, 2026
 
 The owner approved improving and implementing the signature workflow. A message-specific Solure logo replaces the separate hidden pixel when “Logo signature” is selected, giving the image a useful visible purpose while keeping name and contact details readable as text. The original invisible pixel remains an alternative. This extension is published and deployed, with the 79-test suite, TypeScript, builds, CI and controlled live preview/clipboard/capture checks passing. Production preview integration exposed a CSP omission, corrected with an exact untracked-asset allowance and regression test. Actual Outlook on iPhone insertion and received MIME remain unverified.

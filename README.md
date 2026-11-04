@@ -1,6 +1,6 @@
 # Solure Maildesk
 
-A private email image-load dashboard for Solure Digital Works. Create a tracking image, insert it into Outlook, send normally, label it afterward and review requests with optional owner-only email alerts.
+A private email image-load dashboard for Solure Digital Works. Create a tracking image, start tracking when ready, insert it into Outlook, send normally and review requests with owner-only email alerts.
 
 An image request is not proof that a person read a message. Email privacy services may preload images, block them or serve cached copies. Shared and forwarded images cannot identify an individual reader.
 
@@ -12,12 +12,14 @@ The November 4 update is published and deployed at https://maildesk.soluredigita
 
 The subsequent tracked-logo signature extension is published and deployed. All 79 tests and CI passed. The live preview, rich-text copying and one controlled logo-load event were verified. It adds no DNS change, database migration or service. Actual Outlook insertion, including Outlook on iPhone, still needs a received-message/source check.
 
+The tracking/notification activation correction is in progress. The workflow below describes the corrected implementation; publication, migration and live verification are pending.
+
 ## What is included
 
 - Private dashboard, server-side search, pagination and message details.
 - Opaque per-message tracking images served by a separate public Worker.
-- Draft, armed, paused and archived states; labels can be added after sending.
-- Pre-arm event history and first post-arm notification; optional repeat alerts.
+- Inactive, active and archived tracking states; labels can be added anytime.
+- No new capture while inactive; first-load notification per activation and optional hourly repeat alerts.
 - Durable notification outbox, bounded retries and dry-run local transport.
 - Permanent loaded history, never-loaded preservation controls, unread notifications, CSV export and deletion controls.
 - One saved 89-day report per pixel, with an owner-only report history and email delivery queue.
@@ -30,7 +32,7 @@ The app does not read your Outlook mailbox. Recipient and message labels are man
 
 Open a message and choose “Logo signature,” then “Copy for Outlook.” The rich-text clipboard contains the Solure logo, Elijah’s name, business, email and website; it also includes a clean four-line plain-text fallback. The existing approved logo displays at 48 × 50 pixels and is the signature’s **only** tracking image. “Invisible pixel” remains an alternative; use one format per message.
 
-Create and copy a fresh signature for each email. Reusing one tracked signature as Outlook’s global signature combines those emails’ activity in one history. Label and arm the message after sending, as with the original pixel workflow. “Copy HTML” provides source for an HTML-aware insertion method; pasting that source into ordinary email text does not insert the image. “Copy text only” has no image or tracking.
+Create and copy a fresh signature for each email. Reusing one tracked signature as Outlook’s global signature combines those emails’ activity in one history. Prepare the email while tracking is off, then start tracking immediately before pressing Send; copying alone never starts it. Previews after activation and scanners can still cause the first request. “Copy HTML” provides source for an HTML-aware insertion method; pasting that source into ordinary email text does not insert the image. “Copy text only” has no image or tracking.
 
 The dashboard’s preview uses a separate untracked logo, so viewing, hiding or copying it does not record a load. “Images hidden” previews the readable contact text without the logo. An email client may still block images, proxy or cache them, and a request does not prove a human read the email. The logo does not bypass those controls or establish a deliverability improvement. Outlook on iPhone’s handling of the copied signature and external image must be tested before treating that client as supported.
 

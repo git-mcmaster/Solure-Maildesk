@@ -1,10 +1,10 @@
 import type { Env, Notification, Pixel, PixelPage, PixelRow, Settings } from './types';
 
-const pixelSelect = `SELECT p.*, (SELECT n.status FROM notifications n WHERE n.pixel_id=p.id ORDER BY n.created_at DESC, n.id DESC LIMIT 1) AS notification_status FROM pixels p`;
+const pixelSelect = `SELECT p.*, (SELECT n.status FROM notifications n WHERE n.pixel_id=p.id AND n.activation_id=p.activation_id ORDER BY n.created_at DESC, n.id DESC LIMIT 1) AS notification_status FROM pixels p`;
 
 export function pixelFromRow(row: PixelRow, env: Env): Pixel {
   return { id: row.id, token: row.token, label: row.label, recipient: row.recipient, notes: row.notes, status: row.status,
-    createdAt: row.created_at, updatedAt: row.updated_at, armedAt: row.armed_at, firstAlertAt: row.first_alert_at, firstLoadedAt: row.first_loaded_at,
+    createdAt: row.created_at, updatedAt: row.updated_at, armedAt: row.armed_at, activationId: row.activation_id, activationAlertAt: row.activation_alert_at, firstAlertAt: row.first_alert_at, firstLoadedAt: row.first_loaded_at,
     lastLoadedAt: row.last_loaded_at, loadCount: row.load_count, earlyLoadCount: row.early_load_count,
     hasRecordedLoad: row.has_recorded_load === 1, preserveUnloaded: row.preserve_unloaded === 1,
     pixelUrl: `${env.PIXEL_ORIGIN.replace(/\/$/u, '')}/p/${row.token}.gif`, notificationStatus: row.notification_status || 'none' };
@@ -18,6 +18,7 @@ export async function listPixels(env: Env, options: { q?: string; status?: strin
     args.push(options.q.toLowerCase(), options.q.toLowerCase(), options.q.toLowerCase());
   }
   if (options.status === 'active') clauses.push("p.status!='archived'");
+  else if (options.status === 'inactive') clauses.push("p.status IN ('draft','paused')");
   else if (options.status && options.status !== 'all') { clauses.push('p.status=?'); args.push(options.status); }
   const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
   const offset = options.offset ?? 0;

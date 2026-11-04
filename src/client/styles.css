@@ -665,14 +665,11 @@ a {
   background: currentColor;
   flex-shrink: 0;
 }
-.status-draft {
-  color: #73572d;
-  background: #fbf4e9;
-}
 .status-armed {
   color: #3f674a;
   background: #edf6ef;
 }
+.status-draft,
 .status-paused {
   color: #55616d;
   background: #f0f2f5;
@@ -903,6 +900,48 @@ a {
   align-items: start;
   gap: 10px;
   margin-top: 24px;
+}
+.tracking-control {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #dfe4e8;
+  border-radius: 7px;
+  background: #f8f9fa;
+  color: #4b5764;
+}
+.tracking-control[data-active="true"] {
+  background: #f3f8f4;
+  border-color: #d7e5da;
+}
+.tracking-control-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #29343e;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.tracking-control[data-active="true"] .tracking-control-heading {
+  color: #3e6547;
+}
+.tracking-control p {
+  font-size: 12px;
+  line-height: 1.75;
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+}
+.tracking-control .button {
+  margin-top: 12px;
+  min-height: 44px;
+  padding: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: normal;
+}
+.tracking-control .tracking-control-note {
+  color: #596675;
+  font-size: 12px;
+  line-height: 1.7;
 }
 .step-number {
   height: 20px;
