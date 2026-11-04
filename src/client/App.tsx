@@ -9,9 +9,11 @@ import {
 import type {
   Bootstrap,
   LoadEvent,
+  LoadEventPage,
   Notification,
   Pixel,
   PixelStatus,
+  RequestMetadata,
   Settings,
 } from "../server/types";
 
@@ -143,6 +145,65 @@ function htmlFor(pixel: Pixel): string {
   return `<img src="${pixel.pixelUrl.replaceAll("&", "&amp;").replaceAll('"', "&quot;")}" width="1" height="1" alt="" style="width:1px;height:1px;border:0;" />`;
 }
 
+function requestLocation(metadata: RequestMetadata): string {
+  return [metadata.city, metadata.region, metadata.country]
+    .filter(Boolean)
+    .join(", ") || "Location unavailable";
+}
+
+function RequestDetails({ metadata }: { metadata: RequestMetadata | null }) {
+  const location = metadata
+    ? requestLocation(metadata)
+    : "";
+  const rows: [string, string | null | undefined][] = metadata
+    ? [
+        ["Request IP", metadata.requestIp],
+        ["Approximate request location", location],
+        ["Request time zone", metadata.timezone],
+        ["Network", metadata.network],
+        ["Network number (ASN)", metadata.asn == null ? null : `AS${metadata.asn}`],
+        ["Reported client", metadata.client],
+        ["Reported platform", metadata.platform],
+        ["Reported device", metadata.device],
+        ["Possible proxy", metadata.proxy],
+        ["Reported User-Agent", metadata.userAgent],
+      ]
+    : [];
+
+  return (
+    <details className="request-details">
+      <summary>Request details</summary>
+      {metadata ? (
+        <div className="request-details-body">
+          <p className="request-details-note">
+            These describe the image request, not necessarily the reader. A
+            proxy or privacy service may supply its own location and device
+            information. No GPS location is collected.
+          </p>
+          <dl className="request-details-list">
+            {rows.map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value || "Unknown"}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="request-details-note">
+            Client and device hints come from the reported User-Agent and can
+            be inaccurate. An unknown proxy value does not rule out a proxy.
+          </p>
+        </div>
+      ) : (
+        <p className="request-details-note request-details-empty">
+          No request details were saved for this load. Collection may have been
+          off, or this load may predate the feature. Details can’t be recovered
+          for earlier loads.
+        </p>
+      )}
+    </details>
+  );
+}
+
 function Dialog({
   title,
   children,
@@ -225,7 +286,11 @@ export default function App() {
   >(null);
   const [draft, setDraft] = useState({ label: "", recipient: "", notes: "" });
   const [settingsDraft, setSettingsDraft] = useState<Settings | null>(null);
+  const settingsBaselineRef = useRef<Settings | null>(null);
   const [events, setEvents] = useState<LoadEvent[]>([]);
+  const [eventsCursor, setEventsCursor] = useState<string | null>(null);
+  const eventsExpandedRef = useRef(false);
+  const eventsPendingRef = useRef(false);
   const eventsRequestId = useRef(0);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsError, setEventsError] = useState("");
@@ -349,29 +414,47 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
   const loadEvents = useCallback(
-    async (quiet = false) => {
+    async (quiet = false, cursor: string | null = null) => {
       if (!selectedId) return;
+      // Keep an expanded history stable while the owner reads older requests.
+      // Manual refresh starts again at the newest page.
+      if (quiet && (eventsExpandedRef.current || eventsPendingRef.current)) return;
       const requestId = ++eventsRequestId.current;
+      eventsPendingRef.current = true;
+      eventsExpandedRef.current = Boolean(cursor);
       if (!quiet) setEventsLoading(true);
       try {
-        const next = await request<LoadEvent[]>(
-          `/api/pixels/${selectedId}/events`,
+        const query = new URLSearchParams({ limit: "100" });
+        if (cursor) query.set("cursor", cursor);
+        const next = await request<LoadEventPage>(
+          `/api/pixels/${selectedId}/events?${query}`,
         );
         if (requestId === eventsRequestId.current) {
-          setEvents(next);
+          setEvents((current) =>
+            cursor
+              ? [...current, ...next.items.filter((item) => !current.some((event) => event.id === item.id))]
+              : next.items,
+          );
+          setEventsCursor(next.nextCursor);
+          eventsExpandedRef.current = Boolean(cursor);
           setEventsError("");
         }
       } catch (err) {
         if (requestId === eventsRequestId.current)
           setEventsError((err as Error).message);
       } finally {
-        if (requestId === eventsRequestId.current) setEventsLoading(false);
+        if (requestId === eventsRequestId.current) {
+          eventsPendingRef.current = false;
+          setEventsLoading(false);
+        }
       }
     },
     [selectedId],
   );
   useEffect(() => {
     setEvents([]);
+    setEventsCursor(null);
+    eventsExpandedRef.current = false;
     if (!selectedId) return;
     void loadEvents();
     const timer = window.setInterval(() => {
@@ -493,6 +576,7 @@ export default function App() {
   }
   function openSettings() {
     if (data) {
+      settingsBaselineRef.current = { ...data.settings };
       setSettingsDraft({ ...data.settings });
       setDialog("settings");
     }
@@ -1028,6 +1112,7 @@ export default function App() {
                       className="icon-button"
                       onClick={() => void loadEvents()}
                       aria-label="Refresh image activity"
+                      disabled={eventsLoading}
                     >
                       <Icon name="refresh" size={15} />
                     </button>
@@ -1055,20 +1140,43 @@ export default function App() {
                         <strong>Image loaded</strong>
                         <time
                           dateTime={event.createdAt}
-                          title={formatDate(event.createdAt, true)}
+                          title={event.createdAt}
                         >
                           {formatDate(event.createdAt, true)}
                         </time>
+                        {event.metadata ? (
+                          <div className="event-summary">
+                            <p>{requestLocation(event.metadata)} <span>· approximate</span></p>
+                            <p>{event.metadata.proxy
+                              ? `${event.metadata.proxy} · reported proxy`
+                              : [event.metadata.client, event.metadata.platform, event.metadata.device].filter(Boolean).join(" · ") || "Client and device unavailable"}</p>
+                            {event.metadata.network && <p>{event.metadata.network}</p>}
+                          </div>
+                        ) : (
+                          <p className="event-summary event-unavailable">Location and device details weren’t collected for this load.</p>
+                        )}
                         {event.phase === "before_arming" && (
                           <small>While alerts were off</small>
                         )}
+                        <RequestDetails metadata={event.metadata} />
                       </li>
                     ))}
                   </ol>
+                  {eventsCursor && (
+                    <button
+                      className="secondary-button history-more"
+                      disabled={eventsLoading || offline}
+                      onClick={() => void loadEvents(false, eventsCursor)}
+                    >
+                      {eventsLoading ? "Loading earlier requests…" : "Load earlier requests"}
+                    </button>
+                  )}
                   {events.length > 0 && (
                     <p className="quiet-note">
-                      Recent activity within your retention period. A load does
-                      not confirm reading.
+                      {events.length} recorded {events.length === 1 ? "request" : "requests"} shown, newest first.
+                      {eventsCursor ? " Load earlier requests to see more." : " End of retained history."}
+                      {eventsExpandedRef.current ? " Refresh to include new requests." : ""}
+                      {" "}Times use your browser’s time zone; request location is approximate and may belong to a proxy. A load does not confirm reading.
                     </p>
                   )}
                   <div className="detail-actions">
@@ -1219,6 +1327,25 @@ export default function App() {
               people, or someone forwards the message, the pixel cannot identify
               who loaded it.
             </p>
+            <h3>Optional request details</h3>
+            <p>
+              By default, image loads record activity times without request
+              details. In preferences, you can choose to save the request IP,
+              approximate location, network, and reported device and client for
+              future loads. Expand “Request details” in the activity history to
+              see what was available.
+            </p>
+            <p>
+              These details may belong to an image proxy or privacy service,
+              rather than the person reading your email. Location is approximate
+              and does not use GPS. Reported client information and proxy hints
+              can be incomplete or inaccurate.
+            </p>
+            <p>
+              Turning collection off stops saving details for future loads.
+              Saved details follow your activity retention period, or you can
+              remove them by clearing the activity or deleting the message.
+            </p>
             <h3>After sending</h3>
             <p>
               Return here to label the pixel and enable alerts. Earlier loads
@@ -1239,9 +1366,17 @@ export default function App() {
             onSubmit={(event) => {
               event.preventDefault();
               void action("settings", async () => {
+                // Omit unchanged fields so an older tab cannot restore a
+                // collection preference changed in another window.
+                const changes = Object.fromEntries(
+                  Object.entries(settingsDraft).filter(
+                    ([key, value]) =>
+                      value !== settingsBaselineRef.current?.[key as keyof Settings],
+                  ),
+                );
                 await request("/api/settings", {
                   method: "PATCH",
-                  body: JSON.stringify(settingsDraft),
+                  body: JSON.stringify(changes),
                 });
                 await load();
                 setDialog(null);
@@ -1299,6 +1434,37 @@ export default function App() {
                   }
                 />
               </div>
+              <div className="setting-row request-details-setting">
+                <div>
+                  <strong id="request-details-setting-title">
+                    Collect request details
+                  </strong>
+                  <p id="request-details-setting-description">
+                    Save the request IP, approximate location, network, and
+                    reported device and client for future image loads. Off by
+                    default.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  aria-labelledby="request-details-setting-title"
+                  aria-describedby="request-details-setting-description request-details-privacy"
+                  checked={settingsDraft.captureRequestDetails}
+                  onChange={(event) =>
+                    setSettingsDraft({
+                      ...settingsDraft,
+                      captureRequestDetails: event.target.checked,
+                    })
+                  }
+                />
+              </div>
+              <p id="request-details-privacy" className="request-privacy-note">
+                Proxies can replace reader information; this is request data,
+                not a person’s identity or GPS location. Turning this off stops
+                future collection. Saved details follow your{" "}
+                {settingsDraft.retentionDays}-day activity retention setting
+                unless you clear activity or delete the message.
+              </p>
               <label className="setting-select">
                 Keep detailed activity for
                 <select
@@ -1445,8 +1611,8 @@ export default function App() {
           <div className="dialog-body">
             <p>
               {dialog === "delete"
-                ? "This removes the pixel’s label, notes, activity and notifications. Future image requests will not be tracked. This cannot be undone."
-                : "This removes the recorded activity and resets the summary counts for this pixel. Its label, notes and current alert state stay in place. This cannot be undone."}
+                ? "This removes the pixel’s label, notes, activity, saved request details and notifications. Future image requests will not be tracked. This cannot be undone."
+                : "This removes the recorded activity, including saved request details, and resets the summary counts for this pixel. Its label, notes and current alert state stay in place. This cannot be undone."}
             </p>
             <strong>{selected.label || "Untitled message"}</strong>
             {error && (

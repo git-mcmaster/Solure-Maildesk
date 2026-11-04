@@ -24,6 +24,28 @@ export interface LoadEvent {
   id: string;
   createdAt: string;
   phase: 'before_arming' | 'after_arming';
+  metadata: RequestMetadata | null;
+}
+
+export interface LoadEventPage {
+  items: LoadEvent[];
+  nextCursor: string | null;
+}
+
+// These describe the fetching connection and reported UA, not a reader identity.
+export interface RequestMetadata {
+  requestIp: string | null;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  timezone: string | null;
+  asn: number | null;
+  network: string | null;
+  userAgent: string | null;
+  client: string | null;
+  platform: string | null;
+  device: string | null;
+  proxy: string | null;
 }
 
 export interface PixelPage {
@@ -48,6 +70,7 @@ export interface Settings {
   emailEnabled: boolean;
   retentionDays: 30 | 90 | 180;
   repeatAlerts: boolean;
+  captureRequestDetails: boolean;
 }
 
 export interface Bootstrap {

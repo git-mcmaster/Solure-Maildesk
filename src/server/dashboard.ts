@@ -2,10 +2,57 @@ import { authenticate, isDevelopment, validateMutationOrigin } from './auth';
 import { getPixel, getSettings, listNotifications, listPixels, notificationConfigured } from './db';
 import { errorResponse, HttpError, json, onlyFields, readJson, securityHeaders, stringField } from './http';
 import { dispatchNotifications, enforceRetention } from './notifications';
-import type { Bootstrap, Env, LoadEvent, PixelStatus } from './types';
+import { parseRequestMetadata } from './request-metadata';
+import type { Bootstrap, Env, LoadEvent, LoadEventPage, PixelStatus } from './types';
 
 const statuses = new Set<PixelStatus>(['draft', 'armed', 'paused', 'archived']);
 const opaqueId = /^[a-f0-9-]{32,36}$/u;
+const eventId = /^(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/u;
+interface EventRow { id: string; created_at: string; phase: LoadEvent['phase']; request_metadata: string | null }
+interface EventCursor { v: 1; p: string; t: string; i: string }
+
+function encodeEventCursor(cursor: EventCursor): string {
+  return btoa(JSON.stringify(cursor)).replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/u, '');
+}
+
+function decodeEventCursor(value: string, pixelId: string): EventCursor {
+  const invalid = () => new HttpError(400, 'INVALID_QUERY', 'Choose a valid history page.');
+  if (!value || value.length > 512 || !/^[A-Za-z0-9_-]+$/u.test(value)) throw invalid();
+  try {
+    const decoded: unknown = JSON.parse(atob(value.replace(/-/gu, '+').replace(/_/gu, '/')));
+    if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) throw invalid();
+    const cursor = decoded as Record<string, unknown>;
+    if (Object.keys(cursor).sort().join(',') !== 'i,p,t,v' || cursor.v !== 1 || cursor.p !== pixelId
+      || typeof cursor.i !== 'string' || !eventId.test(cursor.i) || typeof cursor.t !== 'string'
+      || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(cursor.t)
+      || new Date(cursor.t).toISOString() !== cursor.t) throw invalid();
+    const valid = cursor as unknown as EventCursor;
+    if (encodeEventCursor(valid) !== value) throw invalid();
+    return valid;
+  } catch { throw invalid(); }
+}
+
+async function listEvents(env: Env, pixelId: string, params: URLSearchParams): Promise<LoadEvent[] | LoadEventPage> {
+  for (const key of params.keys()) {
+    if (!['limit', 'cursor'].includes(key) || params.getAll(key).length !== 1) throw new HttpError(400, 'INVALID_QUERY', 'Choose a valid history page.');
+  }
+  const paged = params.has('limit') || params.has('cursor');
+  const limitValue = params.get('limit');
+  const limit = limitValue === null ? (paged ? 100 : 1000) : Number(limitValue);
+  if (limitValue !== null && (!/^[1-9][0-9]{0,2}$/u.test(limitValue) || limit > 200)) throw new HttpError(400, 'INVALID_QUERY', 'Choose 1 to 200 history events per page.');
+  const cursorValue = params.get('cursor');
+  const cursor = cursorValue === null ? null : decodeEventCursor(cursorValue, pixelId);
+  // Cursor state is not authorization. The owner check and this pixel filter
+  // always apply; keyset order remains stable when earlier rows are added/deleted.
+  const before = cursor ? ' AND (created_at,id)<(?,?)' : '';
+  const args: (string | number)[] = cursor ? [pixelId, cursor.t, cursor.i, limit + 1] : [pixelId, paged ? limit + 1 : limit];
+  const rows = await env.DB.prepare(`SELECT id,created_at,phase,request_metadata FROM events WHERE pixel_id=?${before} ORDER BY created_at DESC,id DESC LIMIT ?`).bind(...args).all<EventRow>();
+  const page = rows.results.slice(0, limit);
+  const items = page.map((row): LoadEvent => ({ id: row.id, createdAt: row.created_at, phase: row.phase, metadata: parseRequestMetadata(row.request_metadata) }));
+  if (!paged) return items;
+  const last = page.at(-1);
+  return { items, nextCursor: rows.results.length > limit && last ? encodeEventCursor({ v: 1, p: pixelId, t: last.created_at, i: last.id }) : null };
+}
 
 function recipientField(value: unknown): string {
   const recipient = stringField(value, 'Recipient', 254);
@@ -71,8 +118,7 @@ async function api(request: Request, env: Env): Promise<Response> {
     const pixel = await requirePixel(env, id);
     if (match[2]) {
       if (method === 'GET') {
-        const rows = await env.DB.prepare('SELECT id,created_at,phase FROM events WHERE pixel_id=? ORDER BY created_at DESC LIMIT 1000').bind(id).all<{ id: string; created_at: string; phase: LoadEvent['phase'] }>();
-        return json(rows.results.map((row) => ({ id: row.id, createdAt: row.created_at, phase: row.phase })));
+        return json(await listEvents(env, id, url.searchParams));
       }
       if (method === 'DELETE') {
         await env.DB.batch([
@@ -105,14 +151,16 @@ async function api(request: Request, env: Env): Promise<Response> {
   if (path === '/api/settings' && method === 'GET') return json(await getSettings(env));
   if (path === '/api/settings' && method === 'PATCH') {
     const body = await readJson(request);
-    onlyFields(body, ['emailEnabled', 'retentionDays', 'repeatAlerts']);
+    onlyFields(body, ['emailEnabled', 'retentionDays', 'repeatAlerts', 'captureRequestDetails']);
     if (body.emailEnabled !== undefined && typeof body.emailEnabled !== 'boolean') throw new HttpError(400, 'INVALID_FIELD', 'Email alerts must be on or off.');
     if (body.repeatAlerts !== undefined && typeof body.repeatAlerts !== 'boolean') throw new HttpError(400, 'INVALID_FIELD', 'Repeat alerts must be on or off.');
+    if (body.captureRequestDetails !== undefined && typeof body.captureRequestDetails !== 'boolean') throw new HttpError(400, 'INVALID_FIELD', 'Request details must be on or off.');
     if (body.retentionDays !== undefined && ![30, 90, 180].includes(body.retentionDays as number)) throw new HttpError(400, 'INVALID_FIELD', 'Choose 30, 90 or 180 days of history.');
     if (body.emailEnabled === true && !notificationConfigured(env)) throw new HttpError(409, 'NOTIFICATION_NOT_CONFIGURED', 'Configure notification sending before enabling email alerts. Dashboard notifications already work.');
-    const current = await getSettings(env);
-    await env.DB.prepare('UPDATE settings SET email_enabled=?,retention_days=?,repeat_alerts=? WHERE id=1')
-      .bind(Number(body.emailEnabled ?? current.emailEnabled), body.retentionDays ?? current.retentionDays, Number(body.repeatAlerts ?? current.repeatAlerts)).run();
+    // Omitted fields are preserved inside the write, so a concurrent retention
+    // save cannot restore a stale capture=true after the owner disabled it.
+    await env.DB.prepare('UPDATE settings SET email_enabled=COALESCE(?,email_enabled),retention_days=COALESCE(?,retention_days),repeat_alerts=COALESCE(?,repeat_alerts),capture_request_details=COALESCE(?,capture_request_details) WHERE id=1')
+      .bind(body.emailEnabled === undefined ? null : Number(body.emailEnabled), body.retentionDays ?? null, body.repeatAlerts === undefined ? null : Number(body.repeatAlerts), body.captureRequestDetails === undefined ? null : Number(body.captureRequestDetails)).run();
     return json(await getSettings(env));
   }
   if (path === '/api/notifications' && method === 'GET') return json(await listNotifications(env));

@@ -1,5 +1,32 @@
 # Verification record
 
+## Optional request details — November 4, 2026
+
+Implemented and verified locally. The owner approved publication, deployment, the additive migration and enabling collection, conditional on a cohesive per-pixel history. The new schema defaults collection off; enabling it records only future requests. Publication and production verification are recorded separately below when performed.
+
+| Check | Observed result |
+| --- | --- |
+| `node node_modules/typescript/bin/tsc --noEmit` | Passed using bundled Node 24.22.1 |
+| `node node_modules/vitest/vitest.mjs run tests/server/request-metadata.test.ts tests/server/maildesk.test.ts` | 40/40 passed: 7 metadata cases and 33 D1/backend cases, including the existing authentication, caps and outbox regressions |
+| `node node_modules/vite/bin/vite.js build` | Passed after the final client changes |
+| `node node_modules/wrangler/bin/wrangler.js deploy --dry-run --config wrangler.dashboard.jsonc --outdir dist/dashboard-worker` and the corresponding `wrangler.pixel.jsonc` / `dist/pixel-worker` command | Both bundles passed; neither deployed |
+| `git diff --check` | Passed after review; no dependency, lockfile, production configuration or unrelated source changes |
+| Disposable SQLite upgrade rehearsal | Earlier schema and existing events survived `0003`; null historical details, off-by-default capture, boolean constraint, triggers and deletion cascade passed |
+| Local Wrangler migration | `0001`, `0002` and `0003` applied successfully to an isolated temporary local database; no production database changed |
+| Browser workflow | Created a disposable local pixel, recorded a load with capture off, enabled capture through preferences, recorded a synthetic proxy-shaped request, expanded its details and the older null-details explanation |
+| Concurrent preferences | Opened a collection-enabled preferences window, disabled capture through a separate local API request, changed only retention in the older window and saved: capture stayed off and retention became 30 days |
+| Responsive timeline | Expanded details at exact 390- and 320-CSS-pixel iframe widths; document scroll widths matched their viewport widths, and long reported client text wrapped. This was browser inspection, not a physical phone test |
+
+Pure cases cover IP validation, fake IPv6-header precedence, Cloudflare’s Class E pseudo-IPv4 preservation, missing fields, explicit proxy precedence, unrecognized clients, hostile/oversized input and corrupted stored JSON. D1 cases cover off/on/off persistence, atomic disable, partial settings updates without restoring stale flags, owner-only access, unchanged public GIF/HEAD behavior, historical events, retention, clearing and deletion.
+
+The local request used a deliberately supplied Google-image-proxy User-Agent, not an actual Gmail fetch. Local Wrangler supplied approximate development geodata alongside the loopback IP; that is emulator evidence, not production geolocation or reader attribution. No Outlook email was sent. Capture details do not appear in CSV exports or notification messages. No dependency, paid service, DNS record, access policy or live collection setting was changed.
+
+The bundled pnpm wrapper attempted package-manager setup and stopped before running the requested check; no module purge/install was accepted. The commands above invoked the existing installed tools directly. Publication, remote migration and actual Cloudflare capture remain separate release steps described in [the runbook](RELEASE.md).
+
+The owner approved publication, deployment, the additive migration and enabling collection on November 4, with the additional requirement that a single pixel group every recorded load with its time, approximate location and attached details. The interface now shows those summaries directly on each entry, with expandable full details. Cursor pagination exposes all retained events rather than stopping at 1,000. A 1,105-event backend regression checks ordering, timestamp ties, null metadata, deleted cursor anchors and cross-pixel/invalid cursors. A matching three-column index and tuple comparison let SQLite seek directly into older history without a temporary sort.
+
+The browser showed 100 local fixture events, then 105 after “Load earlier requests,” with no duplicate entries. Expanded history remains stable during background refresh; manual refresh returns to the newest page. Expanded details at exact 390- and 320-CSS-pixel frames had matching document/viewport widths. The 105-event fixture and its location/network fields are synthetic and local only. A private export of the existing production database was restored into disposable SQLite and upgraded successfully, preserving its two pixels, five events and two notifications with collection off. The disposable local collection setting remains off. No live migration or capture enablement is implied by these local checks.
+
 ## Current status — November 3, 2026
 
 The reviewed source baseline is published in the owner’s public [Solure-Maildesk repository](https://github.com/git-mcmaster/Solure-Maildesk). The owner deferred a repository-visibility change. Initial source commit `61e4b4a773de802c648aa80aafcaf624d7cacf7d` points to tree `ca62a1476ee184aa819c4e16d7db86f94bad2d02`, which exactly matches local source commit `a2a4bb47cb43ceba57b459746930881be5f44421`. Production configuration and initial deployment evidence were then published in commit `e62e20dfd6ad32ec10bc8388f013128b3b94a1d0`, tree `014a227335286fc927b5ae9646b6692bb12a9976`. For both publications, all 33 remote paths, blob hashes, byte sizes and file modes matched the reviewed local snapshots; no extra files, credentials, generated output or local activity records were uploaded. This revision documents the authenticated owner workflow only; application code and production configuration are unchanged.

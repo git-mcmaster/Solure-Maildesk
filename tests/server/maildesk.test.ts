@@ -6,7 +6,7 @@ import { authenticate } from '../../src/server/auth';
 import { fetchDashboard } from '../../src/server/dashboard';
 import { dispatchNotifications, enforceRetention } from '../../src/server/notifications';
 import { fetchPixel } from '../../src/server/pixel';
-import type { Bootstrap, Env, Pixel, PixelPage } from '../../src/server/types';
+import type { Bootstrap, Env, LoadEvent, LoadEventPage, Pixel, PixelPage, Settings } from '../../src/server/types';
 
 let mf: Miniflare;
 let env: Env;
@@ -22,9 +22,9 @@ beforeAll(async () => {
     // complete CREATE TRIGGER statement intact, just as Wrangler migrations do.
     const sql = migration.replace(/--[^\n]*/gu, '');
     const triggerAt = sql.indexOf('CREATE TRIGGER');
-    const setup = sql.slice(0, triggerAt).split(';').map((part) => part.trim()).filter(Boolean);
+    const setup = (triggerAt < 0 ? sql : sql.slice(0, triggerAt)).split(';').map((part) => part.trim()).filter(Boolean);
     await DB.batch(setup.map((statement) => DB.prepare(statement)));
-    await DB.prepare(sql.slice(triggerAt)).run();
+    if (triggerAt >= 0) await DB.prepare(sql.slice(triggerAt)).run();
   }
   env = { DB, OWNER_EMAIL: 'elijah@soluredigitalworks.com', DASHBOARD_ORIGIN: origin, PIXEL_ORIGIN: 'http://127.0.0.1:8788', DEV_AUTH: 'true', EMAIL_MODE: 'dry-run' };
 }, 30_000);
@@ -32,7 +32,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM notifications'), env.DB.prepare('DELETE FROM events'), env.DB.prepare('DELETE FROM pixels'),
-    env.DB.prepare('UPDATE settings SET email_enabled=0,repeat_alerts=0,retention_days=90,event_day=NULL,event_count=0 WHERE id=1'),
+    env.DB.prepare('UPDATE settings SET email_enabled=0,repeat_alerts=0,capture_request_details=0,retention_days=90,event_day=NULL,event_count=0 WHERE id=1'),
   ]);
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -46,6 +46,12 @@ async function api<T = unknown>(path: string, method = 'GET', body?: unknown, ov
 async function create(label = 'A proposal'): Promise<Pixel> { return (await api<Pixel>('/api/pixels', 'POST', { label })).data; }
 async function load(pixel: Pixel) { return fetchPixel(new Request(pixel.pixelUrl), env); }
 async function arm(pixel: Pixel) { return api<Pixel>(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'armed' }); }
+
+function detailedRequest(pixel: Pixel, method = 'GET') {
+  const request = new Request(pixel.pixelUrl, { method, headers: { 'CF-Connecting-IP': '198.51.100.23', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/130.0' } });
+  Object.defineProperty(request, 'cf', { value: { city: 'Test city', region: 'Test region', country: 'US', timezone: 'America/New_York', asn: 64500, asOrganization: 'Test network' } });
+  return request;
+}
 
 describe('owner access and request validation', () => {
   it('fails closed without production Access configuration, even if local bypass is accidentally set', async () => {
@@ -233,6 +239,189 @@ describe('image requests and manual labeling', () => {
     const second = (await api<PixelPage>('/api/pixels?offset=100&status=active')).data;
     expect(second.items).toHaveLength(4);
     expect(second.hasMore).toBe(false);
+  });
+});
+
+describe('paginated retained event history', () => {
+  it('returns every retained event beyond 1000 in stable timestamp/id order, including null details', async () => {
+    const pixel = await create();
+    const fixtures = Array.from({ length: 1105 }, (_, index) => ({
+      id: (index + 1).toString(16).padStart(32, '0'),
+      // At most 180 events per day, with timestamp ties crossing page boundaries.
+      createdAt: new Date(Date.UTC(2026, 9, 20) + Math.floor(index / 180) * 86_400_000 + Math.floor(index % 180 / 20) * 1000).toISOString(),
+      metadata: index % 17 === 0 ? JSON.stringify({ city: `Request location ${index % 3}`, country: 'US' }) : null,
+    }));
+    for (let offset = 0; offset < fixtures.length; offset += 100) {
+      await env.DB.batch(fixtures.slice(offset, offset + 100).map((row) => env.DB.prepare("INSERT INTO events (id,pixel_id,created_at,phase,request_metadata) VALUES (?,?,?,'before_arming',?)").bind(row.id, pixel.id, row.createdAt, row.metadata)));
+    }
+    const expected = [...fixtures].sort((a, b) => a.createdAt === b.createdAt ? (a.id < b.id ? 1 : a.id > b.id ? -1 : 0) : a.createdAt < b.createdAt ? 1 : -1);
+    const legacy = (await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data;
+    expect(Array.isArray(legacy)).toBe(true);
+    expect(legacy.map((event) => event.id)).toEqual(expected.slice(0, 1000).map((row) => row.id));
+    const all: LoadEvent[] = [];
+    let cursor: string | null = null;
+    let complete = false;
+    for (let pageNumber = 0; pageNumber < 20; pageNumber++) {
+      const result: { data: LoadEventPage } = await api<LoadEventPage>(`/api/pixels/${pixel.id}/events?limit=137${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+      expect(result.data.items.length).toBeLessThanOrEqual(137);
+      all.push(...result.data.items);
+      cursor = result.data.nextCursor;
+      if (cursor === null) { complete = true; break; }
+    }
+    expect(complete).toBe(true);
+    expect(all.map((event) => event.id)).toEqual(expected.map((row) => row.id));
+    expect(new Set(all.map((event) => event.id)).size).toBe(1105);
+    expect(all.some((event) => event.metadata === null)).toBe(true);
+    expect(all.some((event) => event.metadata?.city?.startsWith('Request location'))).toBe(true);
+  });
+
+  it('keeps older pages stable when newer events arrive or earlier and cursor rows are deleted', async () => {
+    const pixel = await create();
+    const at = '2026-11-04T00:00:00.000Z';
+    const id = (number: number) => number.toString(16).padStart(32, '0');
+    await env.DB.batch(Array.from({ length: 6 }, (_, index) => env.DB.prepare("INSERT INTO events (id,pixel_id,created_at,phase) VALUES (?,?,?,'before_arming')").bind(id(index + 1), pixel.id, at)));
+    const first = (await api<LoadEventPage>(`/api/pixels/${pixel.id}/events?limit=2`)).data;
+    expect(first.items.map((event) => event.id)).toEqual([id(6), id(5)]);
+    await env.DB.prepare('DELETE FROM events WHERE id=?').bind(id(6)).run();
+    await env.DB.prepare("INSERT INTO events (id,pixel_id,created_at,phase) VALUES (?,?,?,'before_arming')").bind(id(7), pixel.id, '2026-11-04T00:00:01.000Z').run();
+    const second = (await api<LoadEventPage>(`/api/pixels/${pixel.id}/events?limit=2&cursor=${first.nextCursor}`)).data;
+    expect(second.items.map((event) => event.id)).toEqual([id(4), id(3)]);
+    await env.DB.prepare('DELETE FROM events WHERE id=?').bind(id(3)).run();
+    const third = (await api<LoadEventPage>(`/api/pixels/${pixel.id}/events?limit=2&cursor=${second.nextCursor}`)).data;
+    expect(third.items.map((event) => event.id)).toEqual([id(2), id(1)]);
+    expect(third.nextCursor).toBeNull();
+    expect(third.items.every((event) => event.metadata === null)).toBe(true);
+  });
+
+  it('rejects malformed queries and cursors from another pixel, and supports empty and cursor-only pages', async () => {
+    const pixel = await create();
+    const other = await create('Other message');
+    expect((await api<LoadEventPage>(`/api/pixels/${pixel.id}/events?limit=100`)).data).toEqual({ items: [], nextCursor: null });
+    const at = '2026-11-04T00:00:00.000Z';
+    await env.DB.batch(Array.from({ length: 2 }, () => env.DB.prepare("INSERT INTO events (id,pixel_id,created_at,phase) VALUES (?,?,?,'before_arming')").bind(crypto.randomUUID(), pixel.id, at)));
+    const first = (await api<LoadEventPage>(`/api/pixels/${pixel.id}/events?limit=1`)).data;
+    expect(first.nextCursor).toBeTypeOf('string');
+    const continuation = (await api<LoadEventPage>(`/api/pixels/${pixel.id}/events?cursor=${first.nextCursor}`)).data;
+    expect(continuation.items).toHaveLength(1);
+    expect(continuation.nextCursor).toBeNull();
+    const crossPixel = await api(`/api/pixels/${other.id}/events?limit=1&cursor=${first.nextCursor}`);
+    expect(crossPixel.response.status).toBe(400);
+    expect(crossPixel.error?.code).toBe('INVALID_QUERY');
+    const encode = (value: unknown) => btoa(JSON.stringify(value)).replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/u, '');
+    const validShape = { v: 1, p: pixel.id, t: at, i: first.items[0]!.id };
+    const cursors = ['garbage', 'a'.repeat(513), encode({}), encode({ ...validShape, v: 2 }), encode({ ...validShape, t: '2026-02-30T00:00:00.000Z' }), encode({ ...validShape, i: "x' OR 1=1--" }), encode({ ...validShape, extra: true })];
+    const queries = ['limit=', 'limit=0', 'limit=201', 'limit=-1', 'limit=1.5', 'limit=abc', 'limit=10&limit=20', 'cursor=', 'cursor=%25', 'cursor=a&cursor=b', 'unexpected=1', ...cursors.map((cursor) => `cursor=${cursor}`)];
+    for (const query of queries) {
+      const response = await api(`/api/pixels/${pixel.id}/events?${query}`);
+      expect(response.response.status, query).toBe(400);
+      expect(response.error?.code, query).toBe('INVALID_QUERY');
+    }
+  });
+});
+
+describe('optional private request details', () => {
+  it('defaults capture off, validates the owner setting, and does not retain details until enabled', async () => {
+    expect((await api<Settings>('/api/settings')).data.captureRequestDetails).toBe(false);
+    for (const value of ['true', 1, null, {}]) expect((await api('/api/settings', 'PATCH', { captureRequestDetails: value })).response.status).toBe(400);
+    const pixel = await create();
+    await fetchPixel(detailedRequest(pixel), env);
+    expect(await env.DB.prepare('SELECT request_metadata FROM events WHERE pixel_id=?').bind(pixel.id).first('request_metadata')).toBeNull();
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.metadata).toBeNull();
+    const enabled = await api<Settings>('/api/settings', 'PATCH', { captureRequestDetails: true });
+    expect(enabled.response.status).toBe(200);
+    expect(enabled.data.captureRequestDetails).toBe(true);
+    await fetchPixel(detailedRequest(pixel), env);
+    const events = (await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data;
+    expect(events).toHaveLength(2);
+    expect(events.filter((event) => event.metadata)).toHaveLength(1);
+    expect(events.find((event) => event.metadata)?.metadata).toMatchObject({ requestIp: '198.51.100.23', city: 'Test city', country: 'US', network: 'Test network', client: 'Firefox', platform: 'Windows', device: 'Desktop' });
+    await api('/api/settings', 'PATCH', { captureRequestDetails: false });
+    await fetchPixel(detailedRequest(pixel), env);
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data.filter((event) => event.metadata)).toHaveLength(1);
+  });
+
+  it('never exposes stored details through the public image response or an unauthenticated events API', async () => {
+    const pixel = await create();
+    await api('/api/settings', 'PATCH', { captureRequestDetails: true });
+    const known = await fetchPixel(detailedRequest(pixel), env);
+    const unknown = await fetchPixel(detailedRequest({ ...pixel, pixelUrl: `${env.PIXEL_ORIGIN}/p/${'0'.repeat(32)}.gif` }), env);
+    expect(await known.arrayBuffer()).toEqual(await unknown.arrayBuffer());
+    expect([...known.headers]).toEqual([...unknown.headers]);
+    expect(JSON.stringify([...known.headers])).not.toContain('198.51.100.23');
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(1);
+    const production: Env = { ...env, DEV_AUTH: undefined, DASHBOARD_ORIGIN: 'https://maildesk.soluredigitalworks.com', ACCESS_TEAM_DOMAIN: 'private-metadata-test.cloudflareaccess.com', ACCESS_AUD: 'private-metadata-test' };
+    const response = await fetchDashboard(new Request(`${production.DASHBOARD_ORIGIN}/api/pixels/${pixel.id}/events`), production);
+    expect(response.status).toBe(401);
+    expect(await response.text()).not.toContain('198.51.100.23');
+    const prepare = vi.fn(() => { throw new Error('HEAD must not query storage'); });
+    const head = await fetchPixel(detailedRequest(pixel, 'HEAD'), { ...env, DB: { prepare } as unknown as D1Database });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe('');
+    expect(prepare).not.toHaveBeenCalled();
+    await api(`/api/pixels/${pixel.id}`, 'PATCH', { status: 'archived' });
+    await fetchPixel(detailedRequest(pixel), env);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(1);
+  });
+
+  it('rechecks capture atomically so disabling during a request stores no metadata', async () => {
+    const pixel = await create();
+    await api('/api/settings', 'PATCH', { captureRequestDetails: true });
+    const DB = { prepare(sql: string) {
+      if (sql === 'SELECT capture_request_details FROM settings WHERE id=1') return { async first() {
+        await env.DB.prepare('UPDATE settings SET capture_request_details=0 WHERE id=1').run();
+        return 1;
+      } } as unknown as D1PreparedStatement;
+      return env.DB.prepare(sql);
+    } } as unknown as D1Database;
+    await fetchPixel(detailedRequest(pixel), { ...env, DB });
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data).toHaveLength(1);
+    expect(await env.DB.prepare('SELECT request_metadata FROM events WHERE pixel_id=?').bind(pixel.id).first('request_metadata')).toBeNull();
+  });
+
+  it('does not restore stale capture when an unrelated settings save completes after capture is disabled', async () => {
+    await api('/api/settings', 'PATCH', { captureRequestDetails: true });
+    let entered!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const DB = { prepare(sql: string) {
+      const statement = env.DB.prepare(sql);
+      if (sql.startsWith('UPDATE settings SET')) return { bind(...values: unknown[]) {
+        return { async run() { entered(); await gate; return statement.bind(...values).run(); } } as unknown as D1PreparedStatement;
+      } } as unknown as D1PreparedStatement;
+      return statement;
+    } } as unknown as D1Database;
+    const retentionSave = api<Settings>('/api/settings', 'PATCH', { retentionDays: 30 }, { DB });
+    await waiting;
+    try { expect((await api<Settings>('/api/settings', 'PATCH', { captureRequestDetails: false })).data.captureRequestDetails).toBe(false); }
+    finally { release(); }
+    expect((await retentionSave).response.status).toBe(200);
+    expect((await api<Settings>('/api/settings')).data).toMatchObject({ captureRequestDetails: false, retentionDays: 30 });
+  });
+
+  it('serves old events with null details and treats corrupted stored metadata as unavailable', async () => {
+    const pixel = await create();
+    const now = new Date().toISOString();
+    await env.DB.prepare("INSERT INTO events (id,pixel_id,created_at,phase) VALUES (?,?,?,'before_arming')").bind(crypto.randomUUID(), pixel.id, now).run();
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.metadata).toBeNull();
+    await env.DB.prepare("UPDATE events SET request_metadata='not JSON' WHERE pixel_id=?").bind(pixel.id).run();
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.metadata).toBeNull();
+  });
+
+  it('removes metadata with event retention, clear-history and pixel deletion', async () => {
+    const pixel = await create();
+    await api('/api/settings', 'PATCH', { captureRequestDetails: true });
+    await fetchPixel(detailedRequest(pixel), env);
+    await env.DB.prepare("UPDATE events SET created_at='2025-01-01T00:00:00.000Z'").run();
+    await enforceRetention(env);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(0);
+    await fetchPixel(detailedRequest(pixel), env);
+    expect((await api<LoadEvent[]>(`/api/pixels/${pixel.id}/events`)).data[0]?.metadata?.requestIp).toBe('198.51.100.23');
+    await api(`/api/pixels/${pixel.id}/events`, 'DELETE');
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(0);
+    await fetchPixel(detailedRequest(pixel), env);
+    await api(`/api/pixels/${pixel.id}`, 'DELETE');
+    expect(await env.DB.prepare('SELECT COUNT(*) AS count FROM events').first('count')).toBe(0);
   });
 });
 

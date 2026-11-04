@@ -16,6 +16,7 @@ This is a standalone app prepared for GitHub and Cloudflare. Source implementati
 - Pre-arm event history and first post-arm notification; optional repeat alerts.
 - Durable notification outbox, bounded retries and dry-run local transport.
 - Retention settings, unread notifications, CSV export and deletion controls.
+- Optional private request details: connection IP, approximate location, network and reported client/device hints.
 - Cloudflare Access JWT verification, exact owner identity and same-origin mutations.
 
 The app does not read your Outlook mailbox. Recipient and message labels are manually entered. Real Outlook insertion and inbox notification delivery require a user-controlled test after a test endpoint is hosted.
@@ -63,7 +64,11 @@ Keep `.dev.vars`, credentials, database files, dependency folders and build outp
 
 ## Data and limits
 
-Store only private labels, optional recipient/notes, image-load timestamps, lifecycle state and notification state. Recipient IP addresses and message bodies are not application records. Pixel URLs contain random tokens, not recipient addresses.
+Store private labels, optional recipient/notes, image-load timestamps, lifecycle state and notification state. Request-detail collection is off by default. When the owner enables it in preferences, new recorded loads can also save the fetching connection’s IP, approximate city/region/country, time zone, network number/organization and bounded User-Agent with reported client/platform/device hints. No GPS coordinates, postal code, cookies, message bodies or external geolocation lookup are used. Pixel URLs contain random tokens, not recipient addresses.
+
+These details describe an image request, not a verified reader. Email proxies, scanners, VPNs and forwarding can replace or obscure the person’s location and device. An explicit proxy User-Agent suppresses device/platform attribution; missing information stays unknown. Older loads cannot be backfilled. Turning collection off stops future capture; stored details remain until event retention, clearing activity or pixel deletion removes them. Details appear only in the authenticated owner timeline, not in the public GIF or summary CSV.
+
+Select a pixel to see a single history, newest first. Every entry groups its timestamp with the approximate location, reported client/device or proxy and network captured for that particular load; expand the same entry for its IP, time zone, network number and raw reported User-Agent. “Load earlier requests” reaches the rest of the retained history in stable pages, including beyond 1,000 events. An expanded history stays still while you read; Refresh starts again with the latest page. The timeline states when details were not collected, rather than attaching another load’s data.
 
 Detailed history retention is selectable at 30, 90 or 180 days. Pixel-level first/latest timestamps and aggregate counts remain until cleared or the pixel is deleted. The first version caps recorded activity at 200 requests per pixel per UTC day and 10,000 requests per account per UTC day, and alerts at 200 per UTC day. Counts reflect recorded requests subject to these caps, not unique readers.
 

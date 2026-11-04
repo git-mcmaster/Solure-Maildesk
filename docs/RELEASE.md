@@ -23,6 +23,15 @@ This runbook separates confirmed setup from remaining release checks. The owner 
 
 ## 1. Review and source control
 
+### Optional request details — November 4 local change
+
+The owner requested request IP, location and client/device information, then explicitly approved publication, deployment and the additive migration on November 4, conditional on a cohesive per-pixel history. The timeline now groups each load’s timestamp, location and client/network summary with its expandable full details. Cursor pagination provides the full retained history rather than silently stopping at 1,000 entries. Local validation and the production release are recorded separately in the verification record. It adds no dependency, external lookup, paid service, DNS change or permission grant. Cloudflare supplies approximate connection metadata; User-Agent interpretation is a reported hint, not a verified identity.
+
+- Apply additive migration `0003_request_details.sql` before releasing the new Workers. It adds an off-by-default settings flag and nullable event JSON; existing rows retain null details. Rehearse against a disposable copy containing the earlier schema and events, then export a production backup before applying it to the confirmed Maildesk database.
+- Old Worker versions remain compatible with the added columns because their inserts name columns. Rolling back code stops new capture, but does not erase previously saved details or reverse the migration. To remove captured details, use the approved event-retention/clear/delete workflow; a full backup restore would replace newer records and requires separate approval.
+- Verify capture off/on/off, historical null metadata, public GIF equivalence, private API authorization and retention/clear/delete behavior. Verify desktop and narrow timeline/settings layouts with synthetic data before release.
+- The schema defaults collection off. The November 4 approval covers enabling it after deployment and a controlled verification request. Confirm the saved setting and actual Cloudflare fields; local and synthetic fixtures do not prove real-client attribution. Existing Outlook and email-alert release limits still apply.
+
 - Keep this standalone project in the owner’s confirmed `git-mcmaster/Solure-Maildesk` repository. Review each release diff and require passing full-suite CI, type checking, client build and both Worker bundles.
 - Keep secrets, generated output and local activity out of Git. The repository is currently public with the owner’s knowledge; keep the existing website repository independent.
 - Keep production deployment manual at first. Cloudflare’s Git integration can build versions without promoting them by using `wrangler versions upload`; previews and production must use separate resources. An application code rollback does not roll back database changes.

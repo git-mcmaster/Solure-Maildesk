@@ -35,9 +35,9 @@ export async function getPixel(env: Env, id: string): Promise<Pixel | null> {
 }
 
 export async function getSettings(env: Env): Promise<Settings> {
-  const row = await env.DB.prepare('SELECT * FROM settings WHERE id=1').first<{ email_enabled: number; retention_days: 30 | 90 | 180; repeat_alerts: number }>();
+  const row = await env.DB.prepare('SELECT * FROM settings WHERE id=1').first<{ email_enabled: number; retention_days: 30 | 90 | 180; repeat_alerts: number; capture_request_details: number }>();
   if (!row) throw new Error('Database migration missing');
-  return { emailEnabled: row.email_enabled === 1, retentionDays: row.retention_days, repeatAlerts: row.repeat_alerts === 1 };
+  return { emailEnabled: row.email_enabled === 1, retentionDays: row.retention_days, repeatAlerts: row.repeat_alerts === 1, captureRequestDetails: row.capture_request_details === 1 };
 }
 
 export async function listNotifications(env: Env): Promise<Notification[]> {
