@@ -29,7 +29,7 @@ Migration `0004` adds off-by-default never-loaded preservation settings, a persi
 
 Older Worker versions can read the additive schema but **must not be used as a routine rollback**: their scheduled activity-age cleanup would violate permanent history. Use a corrected build that retains the new retention logic. A database restore replaces newer data and requires separate approval. A clear performed before this migration may have erased every indication of an earlier load; the backfill cannot reconstruct missing evidence. Permanent retention increases stored data over time and remains subject to existing free database limits; no paid service or plan upgrade is authorized.
 
-Publication and actual production checks for this update are recorded in [VERIFICATION.md](VERIFICATION.md).
+Published source `fab3ee42d8a3cc27b6e50a70c59ba5808deebb0a` (tree `74356f28653fa12580acc170767ebbbf2db75b0c`) matches the reviewed local source. [CI run 41795515713](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41795515713) passed. Remote `0004` applied successfully; dashboard version `bda63546-78f6-4bc1-a136-d5b7f49843d7` is live with the existing schedule. Public image Worker code/version was unchanged. The live per-pixel keep flag persisted before a controlled first load, then the record switched to permanent retention; it was archived after testing. All original history and notification counts were preserved. Capture remains on, global keep-all off, and email/repeat alerts off. No DNS, Access or paid-service change. Detailed scope and verification limits are recorded in [VERIFICATION.md](VERIFICATION.md).
 
 ## Request-details release — November 4, 2026
 

@@ -26,7 +26,20 @@ Local checks before publication:
 | Browser controls | Per-pixel preservation saved and survived reload. Global keep-all saved and survived reload, then was restored off. A controlled local GET changed an unloaded pixel to permanent retention. Loaded records displayed the permanence explanation |
 | Responsive controls | Per-pixel keep controls and preferences inspected in exact 390/320-CSS-pixel frames; checked document widths matched their viewport widths. Browser-frame tests, not physical-device tests |
 
-A separate read-only review and disposable SQLite query-plan inspection confirmed indexed cleanup without temporary sorting and no additional material defect in the inspected retention implementation. Production migration/deployment is recorded below once verified. Existing inbox-alert and actual-Outlook limitations remain separate from retention behavior.
+A separate read-only review and disposable SQLite query-plan inspection confirmed indexed cleanup without temporary sorting and no additional material defect in the inspected retention implementation. Existing inbox-alert and actual-Outlook limitations remain separate from retention behavior.
+
+### Conditional retention production release
+
+- Published source `fab3ee42d8a3cc27b6e50a70c59ba5808deebb0a`, tree `74356f28653fa12580acc170767ebbbf2db75b0c`, exactly matches local source `c2d3a7e3e4aa554aa73ecf53c18698a984335724` (37 tracked paths). No private backup, tracking token, activity fixture or request metadata was published.
+- [GitHub Actions run 41795515713](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41795515713) passed the clean-environment checks before production migration/deployment.
+- A fresh read-only preflight confirmed three existing pixels, seven events, two notifications, no events/notifications older than 90 days, capture on and email/repeat alerts off. This verified that the old scheduler could not age-purge any existing activity during the brief migration-first deployment window. Older versions remain unsuitable for rollback because their cleanup behavior differs.
+- Applied remote `0004_permanent_loaded_history.sql` successfully to the dedicated Maildesk database. Deployed dashboard version `bda63546-78f6-4bc1-a136-d5b7f49843d7` on the existing custom domain with the existing minute schedule. The public image Worker code/version was unchanged; the additive database trigger marks new recorded loads permanently.
+- The authenticated live preferences showed capture still on, the new global keep-all preference off, and no activity-age dropdown. Created “Retention policy verification” in the owner interface, saved its per-pixel keep flag while still never-loaded, reloaded and confirmed protection persisted.
+- One controlled public GET returned HTTP 200 and the unchanged 42-byte GIF. Reloading the private record showed “Kept permanently after its first recorded load” and one history entry. No email was sent. Archived the controlled record to stop further recording without deleting it.
+- Read-only production checks confirmed all four current pixels marked as loaded/permanent, eight total events (all seven original events preserved), three metadata-bearing events, and two notifications unchanged. The controlled record was archived with both its recorded-load and preservation flags true. The new trigger and cleanup indexes existed.
+- Capture remains enabled; global keep-all remains off, implementing the requested 90-day baseline for unprotected never-loaded pixels. Email and repeat alerts remain off. No paid plan, DNS or Access policy changed. Unauthenticated bootstrap and the new hashed client-script paths returned 302 to the correct Access login.
+
+The 90-day boundary, race behavior and very old loaded-history preservation were tested using disposable clocks/data, not by aging or deleting live records. Actual scheduled deletion after 90 elapsed production days remains unobserved. The live screenshot is stored outside Git and shows the current retention controls.
 
 
 ## Optional request details — November 4, 2026
