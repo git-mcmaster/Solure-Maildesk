@@ -8,7 +8,7 @@ An image request is not proof that a person read a message. Email privacy servic
 
 This is a standalone app prepared for GitHub and Cloudflare. Source implementation and local verification are tracked in [the implementation plan](docs/IMPLEMENTATION_PLAN.md) and [verification record](docs/VERIFICATION.md). No Cloudflare production resources, DNS, live sender or Access application are created by installing or building it. See [the release runbook](docs/RELEASE.md) before any deployment.
 
-The November 4 update adding 89-day reports is implemented and tested locally, but is not yet published or deployed. The production email binding remains unconfigured; a verified destination alone does not establish a working sender or inbox delivery.
+The November 4 update is published and deployed at https://maildesk.soluredigitalworks.com/. Every pixel gets a saved report after 89 elapsed days. A native email binding sends only to the verified Solure owner from `reports@notifications.soluredigitalworks.com`. A clearly labeled setup report passed the live scheduled dispatcher on its first attempt, and the owner confirmed Inbox arrival. Processing a real pixel at its elapsed 89-day boundary remains unobserved. See the dated verification record for evidence and limits.
 
 ## What is included
 
@@ -22,7 +22,7 @@ The November 4 update adding 89-day reports is implemented and tested locally, b
 - Optional private request details: connection IP, approximate location, network and reported client/device hints.
 - Cloudflare Access JWT verification, exact owner identity and same-origin mutations.
 
-The app does not read your Outlook mailbox. Recipient and message labels are manually entered. Real Outlook insertion and inbox notification delivery require a user-controlled test after a test endpoint is hosted.
+The app does not read your Outlook mailbox. Recipient and message labels are manually entered. Actual Outlook image insertion and optional image-load email alerts still require their own user-controlled test. The separately tested scheduled report reached the owner’s Inbox.
 
 ## Local development
 
@@ -60,7 +60,7 @@ migrations/          Versioned database schema
 tests/               Functional and security regression tests
 scripts/             Local development launcher
 docs/                Implementation decisions, release steps and verification
-wrangler.*.jsonc     Separate Worker configurations; production IDs are placeholders
+wrangler.*.jsonc     Separate Worker configurations for the deployed Solure account
 ```
 
 Keep `.dev.vars`, credentials, database files, dependency folders and build output out of Git. The one-day package maturity rule is retained in `pnpm-workspace.yaml`.
