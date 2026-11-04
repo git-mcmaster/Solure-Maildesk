@@ -47,7 +47,7 @@ After owner sign-in, the live browser verified:
 - Requested the new image once before arming. GET returned 200 with 42 bytes; the timeline marked it “While alerts off” and no additional notification was created.
 - Armed the record through the interface, then issued two concurrent controlled GET requests. Both returned 200. The timeline showed three events, including one before arming, and exactly one new in-app notification. Total notifications were two, including the earlier CLI-created test.
 - Marked the new notification read, reducing the unread count from two to one.
-- Paused both controlled test records through the interface. Reloading preserved the records, counts, paused states and notification read state.
+- Paused the owner-workflow record through the interface. Both controlled records showed “Paused,” including the earlier record paused through the D1 CLI. Reloading preserved the records, counts, paused states and notification read state.
 - Confirmed settings showed email notifications disabled and unconfigured, 90-day retention and repeat alerts off.
 - Opened authenticated `/api/health`, which returned `{"data":{"ok":true,"notificationConfigured":false}}`.
 
