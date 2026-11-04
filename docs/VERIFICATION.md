@@ -1,5 +1,19 @@
 # Verification record
 
+## Tracked-logo production verification — November 4, 2026
+
+Published implementation `9625020be92a7964d15851e7518aedc597ec3e8a` passed [CI run 41816250074](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41816250074). The public image Worker was deployed before the dashboard. Live integration then found that the production dashboard CSP blocked its new remote preview, a condition absent from Vite development. Correction `bcb9362af63cf844014633152261243fd28c8ef1`, tree `fe41a0efc0e39240991831ebf9763fde6c6ca6d7`, adds only the exact untracked PNG URL to `img-src`; scripts, connections, framing and tracked-image routes retain their previous restrictions. Its new production-authenticated HTML regression passed in the full **79/79** suite, TypeScript, dashboard dry-run bundle (75.02 KiB / 19.83 KiB gzip), independent review and [CI run 41817500132](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/41817500132). The corrected dashboard is deployed; internal deployment identifiers are retained privately.
+
+Observed live outcomes:
+
+- Owner session renders the actual approved 192 × 200 PNG preview. Browser clipboard contains one unique remote logo image in `text/html` and clean four-line `text/plain`, with no extra GIF.
+- The clearly labeled release-test record stayed at zero through preview/copy checks. HEAD returned 200 with no-store headers and no activity; one deliberate GET returned the exact 3,201-byte approved PNG and recorded one event in that same record’s timeline.
+- Normal browser and GoogleImageProxy-shaped request headers returned 200 PNG; the latter was a simulated request, not an actual Gmail open. The original GIF route still returns 200 / 42 bytes. Python-urllib identification returned Cloudflare error 1010 / 403 while the other sampled identifiers passed; no Cloudflare filtering setting was changed. Actual recipient/proxy behavior is therefore still a separate acceptance check.
+- Unauthenticated `/` and `/api/bootstrap` still redirect to Access. This is sampled route protection, not an exhaustive identity/security audit.
+- All five pre-existing pixel records remained. No migration, DNS, mail routing, sender, retention/report preference or paid service change was made. The new controlled record is labeled as synthetic release verification and archived without deleting its history; its deliberate request must not be counted as recipient engagement.
+
+Actual Outlook browser/iPhone insertion and received source preservation remain unverified. A logo does not bypass blocked images, establish a human read or demonstrate an inbox-placement improvement.
+
 ## Tracked-logo local verification — November 4, 2026
 
 This checkpoint covers the implemented signature extension before publication or deployment. The root implementation agent ran the checks and local browser review below; the separate integration/security review found no material defect in the inspected changes. Existing production report/sender evidence follows in its own dated section and does not verify this extension live.

@@ -10,7 +10,7 @@ This is a standalone app prepared for GitHub and Cloudflare. Source implementati
 
 The November 4 update is published and deployed at https://maildesk.soluredigitalworks.com/. Every pixel gets a saved report after 89 elapsed days. A native email binding sends only to the verified Solure owner from `reports@notifications.soluredigitalworks.com`. A clearly labeled setup report passed the live scheduled dispatcher on its first attempt, and the owner confirmed Inbox arrival. Processing a real pixel at its elapsed 89-day boundary remains unobserved. See the dated verification record for evidence and limits.
 
-The subsequent tracked-logo signature extension is implemented and locally verified; its publication, deployment and production checks are pending. It adds no DNS change, database migration or service. Actual Outlook insertion, including Outlook on iPhone, still needs a received-message/source check.
+The subsequent tracked-logo signature extension is published and deployed. All 79 tests and CI passed. The live preview, rich-text copying and one controlled logo-load event were verified. It adds no DNS change, database migration or service. Actual Outlook insertion, including Outlook on iPhone, still needs a received-message/source check.
 
 ## What is included
 
