@@ -1,3 +1,5 @@
+import type { OutreachState } from '../shared/outreach';
+
 export type PixelStatus = 'draft' | 'armed' | 'paused' | 'archived';
 export type DeliveryStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'dry_run' | 'disabled';
 
@@ -11,6 +13,7 @@ export interface Pixel {
   createdAt: string;
   updatedAt: string;
   armedAt: string | null;
+  scheduledSendAt: string | null;
   activationId: string | null;
   activationAlertAt: string | null;
   firstAlertAt: string | null;
@@ -24,6 +27,8 @@ export interface Pixel {
   notificationStatus: DeliveryStatus | 'none';
   doNotContact: boolean;
   optOutUrl: string | null;
+  outreachId?: string | null;
+  outreachState?: OutreachState | null;
 }
 
 export interface LoadEvent {
@@ -160,6 +165,7 @@ export interface PixelRow {
   created_at: string;
   updated_at: string;
   armed_at: string | null;
+  scheduled_send_at: string | null;
   activation_id: string | null;
   activation_alert_at: string | null;
   first_alert_at: string | null;
@@ -172,4 +178,6 @@ export interface PixelRow {
   notification_status?: DeliveryStatus | null;
   do_not_contact?: number;
   opt_out_token?: string | null;
+  outreach_id?: string | null;
+  outreach_state?: OutreachState | null;
 }

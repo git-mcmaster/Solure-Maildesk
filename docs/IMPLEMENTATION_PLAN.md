@@ -1,5 +1,15 @@
 # Solure Maildesk implementation plan
 
+## Planned-time tracking revision — November 6, 2026
+
+Approved implementation and publication replace the unpublished mailbox-simulation design with a stored planned-send timestamp. The owner schedules Outlook independently; Maildesk records image requests beginning 45 seconds after the supplied time. Requests before that boundary return the image without saving events or alerts. No persistent connection, send confirmation, mailbox credential or email transport is needed. The same controls serve both prepared queue items and existing manual pixels, with change/cancel actions and explicit wording that Outlook must be updated separately.
+
+Preserve exact-version approval, atomic batch checks, recipient-bound opt-outs, do-not-contact suppression, owner authentication, request-detail preferences, permanent loaded history and 89-day reports. Suppression must block new capture and unaccepted alerts without erasing history. Keep the existing dispatcher/query budget; timestamp activation does not add polling or scheduled work. The owner’s current authorization covers publishing and deploying this revision. See SCHEDULED_OUTREACH.md, RELEASE.md and VERIFICATION.md for the current contract and actual results. Earlier local simulation notes below are historical and superseded.
+
+## Local review queue and delayed activation — November 6, 2026
+
+The owner approved local implementation while another chat writes the draft copy. The [scheduled-outreach workflow](SCHEDULED_OUTREACH.md) records the new state machine, version-specific approval, per-recipient preparation, suppression and cancellation guards, 45-second activation boundary, and disconnected Microsoft integration. A loopback-only simulated mailbox exercises the flow without sending email. This is not a release or live-mail authorization. Preserve all earlier opt-out, owner-access, notification and retention safeguards.
+
 ## Outreach opt-out — November 4, 2026
 
 The owner approved a professional “Stop outreach emails” footer and explicitly required that random visitors cannot opt out by merely loading a page. Keep a public, script-free confirmation form on the existing image Worker, with separate 256-bit bearer tokens bound immutably to a normalized saved recipient. GET and HEAD are read-only; an explicit same-origin, bounded form POST records the preference. No public email input, sign-in requirement, recipient display, request-detail capture or automatic submission is provided. A forwarded bearer link can confirm the original recipient; do not present it as identity verification.

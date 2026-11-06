@@ -83,7 +83,11 @@ export async function enforceRetention(env: Env, time = new Date()): Promise<voi
       AND p.first_loaded_at IS NULL AND p.last_loaded_at IS NULL AND p.first_alert_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM events e WHERE e.pixel_id=p.id)
       AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.pixel_id=p.id)
+      AND (p.scheduled_send_at IS NULL OR p.armed_at<=?)
+      AND NOT EXISTS (SELECT 1 FROM outreach_jobs j WHERE j.pixel_id=p.id
+        AND (j.state IN ('draft','prepared','approved','submitting','awaiting_confirmation','cooldown','needs_attention')
+          OR (j.state='scheduled' AND j.tracking_starts_at>?)))
       AND EXISTS (SELECT 1 FROM pixel_reports r WHERE r.source_pixel_id=p.id AND r.status='sent')
     ORDER BY p.created_at,p.id LIMIT 1000
-  )`).bind(cutoff).run();
+  )`).bind(cutoff, time.toISOString(), time.toISOString()).run();
 }

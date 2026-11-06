@@ -1443,7 +1443,7 @@ describe('recipient-confirmed outreach opt-out', () => {
     expect(await env.DB.prepare('SELECT * FROM pixels').first()).toEqual(pixelBefore);
   });
 
-  it('saves a confirmed choice once without changing tracking, events, reports, alerts or collecting request metadata', async () => {
+  it('saves a confirmed choice once, preserving history while stopping future tracking and queued alerts', async () => {
     const { pixel, link } = await linked();
     await start(pixel); await load(pixel);
     const before = await counts();
@@ -1458,7 +1458,10 @@ describe('recipient-confirmed outreach opt-out', () => {
     expect(repeated.status).toBe(200);
     expect(await env.DB.prepare('SELECT * FROM do_not_contact').first()).toEqual(first);
     expect(await counts()).toEqual({ ...before, blocked: 1 });
-    expect(await env.DB.prepare('SELECT * FROM pixels').first()).toEqual(pixelBefore);
+    expect(await env.DB.prepare('SELECT * FROM pixels').first()).toEqual({ ...pixelBefore, status: 'paused', updated_at: expect.any(String) });
+    expect((await env.DB.prepare('SELECT status FROM notifications').all<{ status: string }>()).results.every(value => value.status === 'disabled')).toBe(true);
+    await load(pixel);
+    expect(await counts()).toEqual({ ...before, blocked: 1 });
     expect((await api<Pixel>(`/api/pixels/${pixel.id}`)).data.doNotContact).toBe(true);
   });
 

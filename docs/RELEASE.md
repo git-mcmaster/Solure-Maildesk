@@ -1,5 +1,13 @@
 # Release runbook
 
+## Planned-time tracking — November 6, 2026
+
+The owner explicitly approved simplifying the implementation and publishing it. The release contract is planned Outlook send time plus 45 seconds, enforced on every image request. Maildesk does not send or confirm email and requires no Microsoft connection. Queue import/preparation/exact-version review and manual pixel scheduling share this contract. See [the workflow](SCHEDULED_OUTREACH.md).
+
+Release gates: complete CI, both Worker bundles, focused boundary/reschedule/cancel/suppression regressions, rendered desktop/narrow review, private production export and populated rehearsal of `0008` plus the planned-time migration. Exclude the unused local-only simulated-mailbox migration. Compare existing rows and settings before and after. Deploy the public collector before the dashboard. Use only synthetic addresses for live timing checks; preserve the other chat’s drafts, existing pixels and recipient activity. Verify Access denial and public API denial without changing Access, DNS, mail routing, sender destinations or billing.
+
+Status: local implementation and validation in progress; publication, migration, deployment and live checks are not yet claimed. Record their evidence here after completion.
+
 ## Outreach opt-out release — November 4, 2026
 
 Approved scope is the recipient-confirmed outreach preference flow, permanent do-not-contact list and signature integration. The public route belongs only to the existing image Worker; do not bypass or widen the private dashboard Access policy. Live policy inspection on November 4 confirmed one Allow policy with exactly `elijah@soluredigitalworks.com`, hostname-wide coverage and no other application policy. Application code additionally validates the RS256 JWT signature, issuer, audience, expiry and exact configured owner email. A live second-account denial is not claimed.

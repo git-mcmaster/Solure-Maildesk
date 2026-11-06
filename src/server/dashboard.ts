@@ -5,6 +5,8 @@ import { cancelInactiveNotifications, dispatchNotifications, enforceRetention } 
 import { parseRequestMetadata } from './request-metadata';
 import { dispatchPixelReports, getPixelReport, listReports, queuePixelReports } from './reports';
 import { addDoNotContact, getOrCreateOptOutLink, isDoNotContact, listDoNotContact } from './opt-out';
+import { outreachApi } from './outreach';
+import { scheduleManualPixel } from './scheduling';
 import type { Bootstrap, Env, LoadEvent, LoadEventPage, PixelStatus } from './types';
 
 const statuses = new Set<PixelStatus>(['draft', 'armed', 'paused', 'archived']);
@@ -69,6 +71,12 @@ async function requirePixel(env: Env, id: string) {
   return pixel;
 }
 
+async function protectQueuedPixel(env: Env, id: string) {
+  const active = await env.DB.prepare(`SELECT 1 FROM outreach_jobs WHERE pixel_id=? AND state IN
+    ('draft','prepared','approved','scheduled','submitting','awaiting_confirmation','cooldown','tracking','needs_attention')`).bind(id).first();
+  if (active) throw new HttpError(409, 'SCHEDULE_MANAGED_PIXEL', 'Cancel or stop this item in Draft review before deleting its image or history.');
+}
+
 export function csvCell(value: unknown): string {
   let cell = String(value ?? '');
   if (/^[\s]*[=+@-]/u.test(cell) || /^[\t\r\n]/u.test(cell)) cell = `'${cell}`;
@@ -79,13 +87,14 @@ async function api(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
+  if (path === '/api/outreach' || path.startsWith('/api/outreach/')) return outreachApi(request, env);
   if (path === '/api/health' && method === 'GET') {
     await env.DB.prepare('SELECT id FROM settings WHERE id=1').first();
     return json({ ok: true, notificationConfigured: notificationConfigured(env) });
   }
   if (path === '/api/bootstrap' && method === 'GET') {
     const [page, notifications, settings, counts, unread] = await Promise.all([listPixels(env), listNotifications(env), getSettings(env),
-      env.DB.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(status='armed'),0) AS armed,COALESCE(SUM(load_count>0),0) AS loaded FROM pixels").first<{ total: number; armed: number; loaded: number }>(),
+      env.DB.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(status='armed' AND armed_at<=strftime('%Y-%m-%dT%H:%M:%fZ','now') AND NOT EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(pixels.recipient)))),0) AS armed,COALESCE(SUM(load_count>0),0) AS loaded FROM pixels").first<{ total: number; armed: number; loaded: number }>(),
       env.DB.prepare('SELECT COUNT(*) AS count FROM notifications WHERE read_at IS NULL').first<{ count: number }>(),
     ]);
     const data: Bootstrap = { ownerEmail: env.OWNER_EMAIL, pixelBaseUrl: env.PIXEL_ORIGIN,
@@ -123,6 +132,12 @@ async function api(request: Request, env: Env): Promise<Response> {
     }
     throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'This action is not supported.');
   }
+  const planned = /^\/api\/pixels\/([^/]+)\/schedule$/u.exec(path);
+  if (planned) {
+    const pixel = await requirePixel(env, planned[1]!);
+    if (method !== 'POST') throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Set the tracking plan from your dashboard.');
+    return scheduleManualPixel(env, pixel, await readJson(request));
+  }
   const optOut = /^\/api\/pixels\/([^/]+)\/opt-out-link$/u.exec(path);
   if (optOut) {
     const pixel = await requirePixel(env, optOut[1]!);
@@ -141,6 +156,7 @@ async function api(request: Request, env: Env): Promise<Response> {
         return json(await listEvents(env, id, url.searchParams));
       }
       if (method === 'DELETE') {
+        await protectQueuedPixel(env, id);
         await env.DB.batch([
           env.DB.prepare('DELETE FROM events WHERE pixel_id=?').bind(id),
           env.DB.prepare('DELETE FROM notifications WHERE pixel_id=?').bind(id),
@@ -151,6 +167,7 @@ async function api(request: Request, env: Env): Promise<Response> {
     } else {
       if (method === 'GET') return json(pixel);
       if (method === 'DELETE') {
+        await protectQueuedPixel(env, id);
         await env.DB.batch([
           env.DB.prepare('DELETE FROM pixel_reports WHERE source_pixel_id=?').bind(id),
           env.DB.prepare('DELETE FROM pixels WHERE id=?').bind(id),
@@ -160,6 +177,14 @@ async function api(request: Request, env: Env): Promise<Response> {
       if (method === 'PATCH') {
         const body = await readJson(request);
         onlyFields(body, ['label', 'recipient', 'notes', 'status', 'preserveUnloaded', 'enableEmailAlerts']);
+        if (pixel.status === 'armed' && pixel.scheduledSendAt && pixel.armedAt && pixel.armedAt > new Date().toISOString()) {
+          if (body.status === 'armed') throw new HttpError(409, 'TRACKING_PLAN_PENDING', 'Tracking already has a future start. Reschedule or stop this plan instead of starting early.');
+          if (body.recipient !== undefined && body.recipient !== pixel.recipient) throw new HttpError(409, 'TRACKING_PLAN_PENDING', 'Stop the pending tracking plan before changing its recipient.');
+        }
+        if (body.status !== undefined || body.recipient !== undefined) {
+          const managed = await env.DB.prepare('SELECT 1 FROM outreach_jobs WHERE pixel_id=?').bind(id).first();
+          if (managed) throw new HttpError(409, 'SCHEDULE_MANAGED_PIXEL', 'Manage this image and its timing from Draft review. Its approved recipient and tracking delay are protected.');
+        }
         if (body.preserveUnloaded !== undefined && typeof body.preserveUnloaded !== 'boolean') throw new HttpError(400, 'INVALID_FIELD', 'Pixel preservation must be on or off.');
         if (body.status !== undefined && !statuses.has(body.status as PixelStatus)) throw new HttpError(400, 'INVALID_STATUS', 'Choose a valid pixel status.');
         if (body.enableEmailAlerts !== undefined && (body.enableEmailAlerts !== true || body.status !== 'armed')) throw new HttpError(400, 'INVALID_FIELD', 'Start tracking to enable email alerts.');
@@ -175,24 +200,26 @@ async function api(request: Request, env: Env): Promise<Response> {
         if (body.enableEmailAlerts === true) {
           // Resuming the shared master starts future-only notification windows
           // for every tracking message. Disabled historical alerts stay disabled.
-          edits.push(env.DB.prepare(`UPDATE pixels SET activation_id=lower(hex(randomblob(16))),activation_alert_at=NULL,armed_at=?,updated_at=?
-            WHERE status='armed' AND EXISTS (SELECT 1 FROM settings WHERE id=1 AND email_enabled=0)
+          edits.push(env.DB.prepare(`UPDATE pixels SET activation_id=lower(hex(randomblob(16))),activation_alert_at=NULL,armed_at=CASE WHEN scheduled_send_at IS NOT NULL THEN armed_at ELSE ? END,updated_at=?
+            WHERE status='armed' AND armed_at<=? AND EXISTS (SELECT 1 FROM settings WHERE id=1 AND email_enabled=0)
               AND EXISTS (SELECT 1 FROM pixels target WHERE target.id=?
-                AND NOT EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(COALESCE(?,target.recipient)))) )`).bind(now, now, id, recipient));
+                AND NOT EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(COALESCE(?,target.recipient)))) )`).bind(now, now, now, id, recipient));
         }
         // Every omitted value is preserved by the write itself. A stale label
         // save cannot undo a concurrent Start/Pause or restore old notes.
         edits.push(env.DB.prepare(`UPDATE pixels SET label=COALESCE(?,label),recipient=COALESCE(?,recipient),notes=COALESCE(?,notes),
+          scheduled_send_at=CASE WHEN ? IS NOT NULL AND ?!='armed' THEN NULL ELSE scheduled_send_at END,
           activation_id=CASE WHEN ?='armed' AND (status!='armed' OR activation_id IS NULL) THEN ? ELSE activation_id END,
           activation_alert_at=CASE WHEN ?='armed' AND (status!='armed' OR activation_id IS NULL) THEN NULL ELSE activation_alert_at END,
           armed_at=CASE WHEN ?='armed' AND (status!='armed' OR activation_id IS NULL) THEN ? ELSE armed_at END,
           status=COALESCE(?,status),preserve_unloaded=COALESCE(?,preserve_unloaded),updated_at=? WHERE id=?
           AND (?=0 OR COALESCE(?,status)!='armed' OR NOT EXISTS
-            (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(COALESCE(?,pixels.recipient)))))`)
+            (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(COALESCE(?,pixels.recipient)))))
+          AND (? IS NULL OR scheduled_send_at IS NULL OR status!='armed' OR armed_at<=? OR lower(trim(recipient))=lower(trim(?)))`)
           .bind(body.label === undefined ? null : stringField(body.label, 'Label', 150) || 'Unlabeled pixel',
             recipient, body.notes === undefined ? null : stringField(body.notes, 'Notes', 2000),
-            status, crypto.randomUUID(), status, status, now, status,
-            body.preserveUnloaded === undefined ? null : Number(body.preserveUnloaded), now, id, Number(guardRecipient), status, recipient));
+            status, status, status, crypto.randomUUID(), status, status, now, status,
+            body.preserveUnloaded === undefined ? null : Number(body.preserveUnloaded), now, id, Number(guardRecipient), status, recipient, recipient, now, recipient));
         if (body.enableEmailAlerts === true) edits.push(env.DB.prepare(`UPDATE settings SET email_enabled=1 WHERE id=1
           AND EXISTS (SELECT 1 FROM pixels p WHERE p.id=? AND p.status='armed'
             AND (? IS NULL OR p.recipient=?)
@@ -204,6 +231,7 @@ async function api(request: Request, env: Env): Promise<Response> {
         if (guardRecipient && (body.status ?? pixel.status) === 'armed' && await isDoNotContact(env, recipient ?? pixel.recipient)) {
           throw new HttpError(409, 'DO_NOT_CONTACT', 'This address has opted out. Do not send further sales emails.');
         }
+        if (recipient !== null && saved.recipient !== recipient) throw new HttpError(409, 'SCHEDULE_CHANGED', 'The recipient is protected by a pending tracking plan. Stop it before changing the recipient.');
         return json(saved);
       }
     }
@@ -224,8 +252,8 @@ async function api(request: Request, env: Env): Promise<Response> {
     const edits: D1PreparedStatement[] = [];
     if (body.emailEnabled === true) {
       const now = new Date().toISOString();
-      edits.push(env.DB.prepare(`UPDATE pixels SET activation_id=lower(hex(randomblob(16))),activation_alert_at=NULL,armed_at=?,updated_at=?
-        WHERE status='armed' AND EXISTS (SELECT 1 FROM settings WHERE id=1 AND email_enabled=0)`).bind(now, now));
+      edits.push(env.DB.prepare(`UPDATE pixels SET activation_id=lower(hex(randomblob(16))),activation_alert_at=NULL,armed_at=CASE WHEN scheduled_send_at IS NOT NULL THEN armed_at ELSE ? END,updated_at=?
+        WHERE status='armed' AND armed_at<=? AND EXISTS (SELECT 1 FROM settings WHERE id=1 AND email_enabled=0)`).bind(now, now, now));
     }
     edits.push(env.DB.prepare('UPDATE settings SET email_enabled=COALESCE(?,email_enabled),retention_days=COALESCE(?,retention_days),repeat_alerts=COALESCE(?,repeat_alerts),capture_request_details=COALESCE(?,capture_request_details),keep_unloaded_pixels=COALESCE(?,keep_unloaded_pixels) WHERE id=1')
       .bind(body.emailEnabled === undefined ? null : Number(body.emailEnabled), body.retentionDays ?? null, body.repeatAlerts === undefined ? null : Number(body.repeatAlerts), body.captureRequestDetails === undefined ? null : Number(body.captureRequestDetails), body.keepUnloadedPixels === undefined ? null : Number(body.keepUnloadedPixels)));
