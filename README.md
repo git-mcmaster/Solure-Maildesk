@@ -1,12 +1,12 @@
 # Solure Maildesk
 
-A private email image-load dashboard for Solure Digital Works. Create a tracking image, start tracking when ready, insert it into Outlook, send normally and review requests with owner-only email alerts.
+A private email image-load dashboard for Solure Digital Works. Prepare a tracking image, insert it into Outlook while tracking is off, then start or schedule tracking and review requests with owner-only email alerts.
 
 An image request is not proof that a person read a message. Email privacy services may preload images, block them or serve cached copies. Shared and forwarded images cannot identify an individual reader.
 
 ## Project state
 
-The November 6 planned-time update is implemented for release. Import and review externally written drafts, prepare one tracking logo and recipient-bound opt-out link, then copy an approved message into Outlook. Schedule the actual email separately in Outlook and enter that same planned send time in Maildesk. Recording starts 45 seconds after that time, using a saved server timestamp. Maildesk does not connect to Microsoft, send emails or confirm delivery. Publication, deployment and live verification are recorded separately in [the release runbook](docs/RELEASE.md) and [verification record](docs/VERIFICATION.md). See [the complete workflow](docs/SCHEDULED_OUTREACH.md).
+The November 6 planned-time update is published and deployed, with 135 tests passing and controlled live timing checks complete. Import and review externally written drafts, prepare one tracking logo and recipient-bound opt-out link, then copy an approved message into Outlook. Schedule the actual email separately in Outlook and enter that same planned send time in Maildesk. Recording starts 45 seconds after that time, using a saved server timestamp. Maildesk does not connect to Microsoft, send emails or confirm delivery. Publication, deployment and live verification are recorded separately in [the release runbook](docs/RELEASE.md) and [verification record](docs/VERIFICATION.md). See [the complete workflow](docs/SCHEDULED_OUTREACH.md).
 
 This is a standalone app prepared for GitHub and Cloudflare. Source implementation and local verification are tracked in [the implementation plan](docs/IMPLEMENTATION_PLAN.md) and [verification record](docs/VERIFICATION.md). No Cloudflare production resources, DNS, live sender or Access application are created by installing or building it. See [the release runbook](docs/RELEASE.md) before any deployment.
 
@@ -19,6 +19,7 @@ The tracking/notification activation correction is published, migrated and deplo
 ## What is included
 
 - Private dashboard, server-side search, pagination and message details.
+- Draft import, recipient-specific preparation, exact-version approval and saved-time tracking schedules with a 45-second delay.
 - Opaque per-message tracking images served by a separate public Worker.
 - Inactive, active and archived tracking states; labels can be added anytime.
 - No new capture while inactive; first-load notification per activation and optional hourly repeat alerts.
@@ -28,7 +29,7 @@ The tracking/notification activation correction is published, migrated and deplo
 - Optional private request details: connection IP, approximate location, network and reported client/device hints.
 - Cloudflare Access JWT verification, exact owner identity and same-origin mutations.
 
-The app does not read your Outlook mailbox. Recipient and message labels are manually entered. Actual Outlook image insertion still requires its user-controlled test. The controlled image-load alert passed production dispatch; its Inbox confirmation is pending. The separately tested scheduled report reached the owner’s Inbox.
+The app does not read your Outlook mailbox. Recipients and message labels are entered manually or imported through the review queue. Actual Outlook image insertion still requires its user-controlled test. The controlled image-load alert passed production dispatch; its Inbox confirmation is pending. The separately tested scheduled report reached the owner’s Inbox.
 
 ## Tracked-logo signature
 

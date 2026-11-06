@@ -17,6 +17,8 @@ This is a planned-time contract. Maildesk cannot know whether Outlook actually s
 
 Existing pixels also have planned-time controls in their detail view; importing a draft is not required. Manual immediate Start and Stop remain available. Use a fresh pixel/signature for each email; reusing a tracked image combines activity in one history.
 
+Scheduled image-load emails use the workspace’s Settings. If alerts are already on, the form explains that they apply; it does not offer an individual-message email-off switch. If alerts are paused, resuming them is an explicit unchecked option and affects all active pixels. While a manual pixel is already recording, stop it before creating a new schedule; future schedules can still be changed before recording begins.
+
 ## Timing and safety
 
 Scheduling immediately installs a future activation timestamp and a fresh activation identity. Before that boundary, GIF and logo requests are served normally but save no event, counters or notification. At or after the boundary, an eligible request records activity without waiting for a scheduled task. Rescheduling before activation replaces the old boundary. Cancelling pauses capture and invalidates unaccepted alerts. The workspace email switch does not move a future schedule earlier.
