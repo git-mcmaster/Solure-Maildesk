@@ -401,6 +401,7 @@ export default function App() {
   const [copyNotice, setCopyNotice] = useState("");
   const [plannedSendTime, setPlannedSendTime] = useState(() => plannedInputTime());
   const [scheduleEmailAlerts, setScheduleEmailAlerts] = useState(false);
+  useEffect(() => { setScheduleEmailAlerts(false); }, [data?.settings.emailEnabled]);
   const [emailFormat, setEmailFormat] = useState<EmailImageFormat>("signature");
   const [previewImages, setPreviewImages] = useState(true);
   const [includeOptOut, setIncludeOptOut] = useState(true);
@@ -703,7 +704,7 @@ export default function App() {
     selectedIdRef.current = pixel.id;
     setCopyNotice("");
     setPlannedSendTime(plannedInputTime(pixel.scheduledSendAt));
-    setScheduleEmailAlerts(data?.settings.emailEnabled ?? false);
+    setScheduleEmailAlerts(false);
     setIncludeOptOut(true);
   }
   async function createPixel() {
@@ -770,7 +771,7 @@ export default function App() {
     await action("schedule-tracking", async () => {
       if (dirty) throw new Error("Save the message’s recipient and details before scheduling tracking.");
       const sendAt = scheduleIso(plannedSendTime);
-      const pixel = await request<Pixel>(`/api/pixels/${selected.id}/schedule`, { method: "POST", body: JSON.stringify({ sendAt, ...(scheduleEmailAlerts ? { enableEmailAlerts: true } : {}) }) });
+      const pixel = await request<Pixel>(`/api/pixels/${selected.id}/schedule`, { method: "POST", body: JSON.stringify({ sendAt, ...(!data?.settings.emailEnabled && scheduleEmailAlerts ? { enableEmailAlerts: true } : {}) }) });
       setSelectedRecord(pixel);
       await load();
       await loadList();
@@ -1368,7 +1369,7 @@ export default function App() {
                     {selected.status !== "archived" && <form className="tracking-schedule-form" onSubmit={(event) => void schedulePixelTracking(event)}>
                       <label>Outlook scheduled send time<input type="datetime-local" required value={plannedSendTime} disabled={!!busy || offline} onChange={(event) => setPlannedSendTime(event.target.value)} /></label>
                       <p className="tracking-control-note">{Intl.DateTimeFormat().resolvedOptions().timeZone} · tracking begins 45 seconds later. Set the email’s send time separately in Outlook.</p>
-                      <label className="tracking-schedule-alerts"><input type="checkbox" checked={scheduleEmailAlerts} disabled={!!busy || offline || !data.notificationConfigured} onChange={(event) => setScheduleEmailAlerts(event.target.checked)} /><span>Use Maildesk’s image-load email alerts. This resumes email alerts if they’re paused.</span></label>
+                      {data.settings.emailEnabled ? <p className="tracking-control-note">Image-load emails are on in Settings. This schedule uses that setting.</p> : <label className="tracking-schedule-alerts"><input type="checkbox" checked={scheduleEmailAlerts} disabled={!!busy || offline || !data.notificationConfigured} onChange={(event) => setScheduleEmailAlerts(event.target.checked)} /><span>Resume image-load emails in Settings. This turns email alerts on for all active pixels.</span></label>}
                       {!data.settings.emailEnabled && !scheduleEmailAlerts && <p className="tracking-control-note">Image-load emails are paused in Settings. Scheduled tracking can still save activity.</p>}
                       {!validSavedRecipient && <p className="tracking-control-note">Add and save a complete recipient before scheduling so the do-not-contact check can protect this message.</p>}
                       {dirty && <p className="tracking-control-note">Save your message details before scheduling tracking.</p>}
