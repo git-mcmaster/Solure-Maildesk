@@ -1366,7 +1366,7 @@ export default function App() {
                         )}
                       </>
                     )}
-                    {selected.status !== "archived" && <form className="tracking-schedule-form" onSubmit={(event) => void schedulePixelTracking(event)}>
+                    {selected.status !== "archived" && (selected.status !== "armed" || selectedTrackingScheduled) && <form className="tracking-schedule-form" onSubmit={(event) => void schedulePixelTracking(event)}>
                       <label>Outlook scheduled send time<input type="datetime-local" required value={plannedSendTime} disabled={!!busy || offline} onChange={(event) => setPlannedSendTime(event.target.value)} /></label>
                       <p className="tracking-control-note">{Intl.DateTimeFormat().resolvedOptions().timeZone} · tracking begins 45 seconds later. Set the email’s send time separately in Outlook.</p>
                       {data.settings.emailEnabled ? <p className="tracking-control-note">Image-load emails are on in Settings. This schedule uses that setting.</p> : <label className="tracking-schedule-alerts"><input type="checkbox" checked={scheduleEmailAlerts} disabled={!!busy || offline || !data.notificationConfigured} onChange={(event) => setScheduleEmailAlerts(event.target.checked)} /><span>Resume image-load emails in Settings. This turns email alerts on for all active pixels.</span></label>}
@@ -1376,7 +1376,8 @@ export default function App() {
                       <button className="button secondary full-width" type="submit" disabled={!!busy || offline || dirty || !validSavedRecipient || selected.doNotContact}>{busy === "schedule-tracking" ? "Saving schedule…" : selectedTrackingScheduled ? "Change tracking schedule" : "Schedule tracking + 45 seconds"}</button>
                       <p className="tracking-control-note">Changing or cancelling this schedule does not change Outlook’s email. Update both places if the planned send time changes. The saved tracking time works even when this dashboard is closed.</p>
                     </form>}
-                    <p className="tracking-control-note">Copying doesn’t start tracking. Start immediately or schedule it above; previews after tracking starts can still count.</p>
+                    {selected.status === "armed" && !selectedTrackingScheduled && <p className="tracking-control-note">Stop tracking before creating a new tracking schedule. Your saved history will stay.</p>}
+                    <p className="tracking-control-note">Copying doesn’t start tracking. Start immediately or choose a tracking schedule; previews after tracking starts can still count.</p>
                   </section>}
                   {!selected.outreachId && <>
                   <div className="workflow-step">

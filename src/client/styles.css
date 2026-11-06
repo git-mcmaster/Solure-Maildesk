@@ -869,12 +869,14 @@ a {
   margin-top: 7px;
 }
 .detail-card {
+  min-width: 0;
   background: white;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 19px 20px;
 }
 .detail-column {
+  min-width: 0;
   scroll-margin-top: 20px;
 }
 .detail-header {
@@ -1834,7 +1836,7 @@ a {
   }
   .detail-column {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 20px;
   }
   .detail-card {
@@ -2197,7 +2199,7 @@ a {
     gap: 8px;
   }
   .detail-column {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0;
   }
   .guide-card {
