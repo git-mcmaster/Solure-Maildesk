@@ -1,16 +1,19 @@
 import type { Env, Notification, Pixel, PixelPage, PixelRow, Settings } from './types';
 
-const pixelSelect = `SELECT p.*, (SELECT n.status FROM notifications n WHERE n.pixel_id=p.id AND n.activation_id=p.activation_id ORDER BY n.created_at DESC, n.id DESC LIMIT 1) AS notification_status,
+const pixelSelect = `SELECT p.*, (SELECT j.id FROM outreach_jobs j WHERE j.pixel_id=p.id LIMIT 1) AS outreach_id,
+  (SELECT j.state FROM outreach_jobs j WHERE j.pixel_id=p.id LIMIT 1) AS outreach_state,
+  (SELECT n.status FROM notifications n WHERE n.pixel_id=p.id AND n.activation_id=p.activation_id ORDER BY n.created_at DESC, n.id DESC LIMIT 1) AS notification_status,
   EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(p.recipient))) AS do_not_contact,
   (SELECT l.token FROM opt_out_links l WHERE l.pixel_id=p.id AND l.recipient=lower(trim(p.recipient)) LIMIT 1) AS opt_out_token FROM pixels p`;
 
 export function pixelFromRow(row: PixelRow, env: Env): Pixel {
   return { id: row.id, token: row.token, label: row.label, recipient: row.recipient, notes: row.notes, status: row.status,
-    createdAt: row.created_at, updatedAt: row.updated_at, armedAt: row.armed_at, activationId: row.activation_id, activationAlertAt: row.activation_alert_at, firstAlertAt: row.first_alert_at, firstLoadedAt: row.first_loaded_at,
+    createdAt: row.created_at, updatedAt: row.updated_at, armedAt: row.armed_at, scheduledSendAt: row.scheduled_send_at ?? null, activationId: row.activation_id, activationAlertAt: row.activation_alert_at, firstAlertAt: row.first_alert_at, firstLoadedAt: row.first_loaded_at,
     lastLoadedAt: row.last_loaded_at, loadCount: row.load_count, earlyLoadCount: row.early_load_count,
     hasRecordedLoad: row.has_recorded_load === 1, preserveUnloaded: row.preserve_unloaded === 1,
     pixelUrl: `${env.PIXEL_ORIGIN.replace(/\/$/u, '')}/p/${row.token}.gif`, notificationStatus: row.notification_status || 'none',
-    doNotContact: row.do_not_contact === 1,
+    doNotContact: row.do_not_contact === 1, outreachId: row.outreach_id ?? null,
+    outreachState: row.outreach_state === 'scheduled' && row.status === 'armed' && row.armed_at && row.armed_at <= new Date().toISOString() ? 'tracking' : row.outreach_state ?? null,
     optOutUrl: row.opt_out_token ? `${env.PIXEL_ORIGIN.replace(/\/$/u, '')}/outreach/stop/${row.opt_out_token}` : null };
 }
 

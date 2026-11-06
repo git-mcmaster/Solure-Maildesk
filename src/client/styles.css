@@ -3284,3 +3284,161 @@ body {
     padding: 10px;
   }
 }
+
+/* Owner-reviewed outreach queue. The simulator is deliberately visible. */
+.outreach-queue { min-width: 0; }
+.outreach-queue h2 { font-size: 18px; line-height: 1.4; letter-spacing: -.3px; }
+.outreach-queue .button, .outreach-queue .text-button { min-height: 44px; }
+.outreach-queue .page-heading { align-items: center; }
+.outreach-queue .page-heading > .button { flex-shrink: 0; }
+.outreach-mode { display: flex; align-items: flex-start; gap: 18px; border: 1px solid #cddde9; border-radius: 10px; background: #edf5fb; padding: 19px 21px; margin-bottom: 24px; }
+.outreach-mode-pill { flex-shrink: 0; padding: 6px 8px; border-radius: 4px; background: #dcebf6; color: #284f6c; font-size: 10px; letter-spacing: 1px; font-weight: 750; line-height: 1.5; }
+.outreach-mode strong { font-size: 14px; }
+.outreach-mode p, .outreach-section-head p, .outreach-schedule > div p p { color: #536372; font-size: 13px; line-height: 1.7; margin-top: 5px; }
+.outreach-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 0; list-style: none; margin: 0 0 28px; }
+.outreach-steps li { display: flex; align-items: center; gap: 9px; font-size: 12px; color: #536372; line-height: 1.5; }
+.outreach-steps li > span { width: 25px; height: 25px; flex-shrink: 0; display: grid; place-items: center; border: 1px solid #dbe1e7; border-radius: 50%; color: #7b543d; font-size: 12px; font-weight: 650; background: white; }
+.outreach-import, .outreach-schedule, .outreach-list, .outreach-review, .outreach-start-hint { background: #fff; border: 1px solid #e0e4e9; border-radius: 10px; min-width: 0; }
+.outreach-import, .outreach-schedule { padding: 23px; margin-bottom: 24px; }
+.outreach-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.outreach-section-head h2 { overflow-wrap: anywhere; }
+.outreach-import .outreach-section-head { margin-bottom: 18px; }
+.outreach-import .outreach-section-head .button { flex-shrink: 0; }
+.outreach-file-input { display: none; }
+.outreach-queue label { display: flex; flex-direction: column; gap: 7px; color: #4e5e6e; font-size: 12px; font-weight: 600; line-height: 1.5; }
+.outreach-queue input:not([type="checkbox"]), .outreach-queue textarea, .outreach-queue select { display: block; width: 100%; min-height: 44px; border: 1px solid #d9dfe5; border-radius: 6px; padding: 11px; color: #273441; font-size: 14px; font-weight: 400; background: #fff; line-height: 1.5; }
+.outreach-queue input:disabled, .outreach-queue textarea:disabled { color: #5b6773; background: #f6f7f8; opacity: 1; }
+.outreach-queue input:read-only { background: #f7f8fa; font-size: 12px; }
+.outreach-import textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.outreach-import form > .button { margin-top: 16px; }
+.outreach-small { font-size: 12px; color: #5c6a78; line-height: 1.75; font-weight: 400; }
+.outreach-import .outreach-small { margin-top: 10px; }
+.outreach-notice { border-radius: 7px; padding: 14px 16px; background: #f3f5f7; color: #536372; font-size: 13px; line-height: 1.7; margin-block: 16px; }
+.outreach-notice strong { font-size: 13px; }
+.outreach-notice p + p { margin-top: 6px; }
+.outreach-danger { color: #842d26; background: #fff0ec; border: 1px solid #f2d5cf; }
+.outreach-warning { color: #765b22; background: #fff7df; border: 1px solid #eedfb9; }
+.outreach-success { color: #2e6247; background: #eaf6ef; border: 1px solid #cee7d9; }
+.outreach-loading { padding: 30px 0; color: #596675; font-size: 14px; }
+.outreach-schedule > form { display: flex; align-items: flex-start; gap: 22px; margin-top: 20px; }
+.outreach-schedule > form > label { width: min(300px, 50%); }
+.outreach-schedule-action { display: flex; align-items: center; justify-content: flex-end; gap: 18px; flex: 1; padding-top: 25px; }
+.outreach-schedule-action > strong { font-size: 12px; font-weight: 550; color: #596675; }
+.outreach-schedule-confirm { padding: 19px; background: #fff4e9; border: 1px solid #f3d9c6; border-radius: 7px; margin-top: 22px; }
+.outreach-schedule-confirm > strong { font-size: 14px; line-height: 1.6; }
+.outreach-schedule-confirm > p { color: #745a43; font-size: 13px; line-height: 1.7; margin-top: 8px; }
+.outreach-schedule-confirm > div { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 15px; }
+.outreach-workspace { display: grid; grid-template-columns: minmax(280px, .9fr) minmax(360px, 1.1fr); align-items: start; gap: 22px; }
+.outreach-list { overflow: hidden; }
+.outreach-list > .outreach-section-head { padding: 22px 20px 17px; }
+.outreach-count { display: inline-block; min-width: 22px; padding: 1px 5px; margin-left: 5px; font-size: 12px; font-weight: 500; text-align: center; color: #667380; background: #f0f2f4; border-radius: 4px; vertical-align: middle; }
+.outreach-list-tools { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; padding: 0 20px 18px; }
+.outreach-list-tools label { flex: 1; min-width: 140px; }
+.outreach-list-tools .text-button { font-size: 12px; }
+.outreach-row { display: flex; border-top: 1px solid #e8ebef; background: #fff; }
+.outreach-row-selected { background: #fff8f1; box-shadow: inset 3px 0 0 #ff6a21; }
+.outreach-row-check { width: 48px; padding: 21px 0 0 17px; flex-shrink: 0; }
+.outreach-row-check input { width: 18px; height: 18px; margin: 0; accent-color: #b54b17; }
+.outreach-row-open { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; text-align: left; width: 100%; min-width: 0; background: transparent; padding: 18px 18px 18px 0; }
+.outreach-row-open > strong { font-size: 14px; color: #2f3b48; line-height: 1.6; overflow-wrap: anywhere; }
+.outreach-row-open > span:not(.outreach-status), .outreach-row-open > small { font-size: 12px; color: #586777; line-height: 1.6; overflow-wrap: anywhere; max-width: 100%; }
+.outreach-row-open > .outreach-row-subject { margin-top: 3px; }
+.outreach-status { display: inline-flex; align-items: center; flex-shrink: 0; border-radius: 5px; padding: 4px 7px; background: #eef1f5; color: #596675; font-size: 11px; font-weight: 650; line-height: 1.5; }
+.outreach-row-open > .outreach-status { margin-top: 5px; }
+.outreach-status-approved, .outreach-status-tracking { color: #3b6a4e; background: #eaf5ee; }
+.outreach-status-prepared, .outreach-status-scheduled, .outreach-status-cooldown { color: #785a25; background: #fff4d8; }
+.outreach-status-blocked, .outreach-status-needs_attention { color: #92392d; background: #fff0ec; }
+.outreach-list-footer { padding: 17px 20px; border-top: 1px solid #e8ebef; color: #637180; font-size: 11px; line-height: 1.6; background: #fcfdfe; }
+.outreach-empty { padding: 28px 20px; color: #5b6977; font-size: 13px; line-height: 1.8; border-top: 1px solid #e8ebef; }
+.outreach-detail { min-width: 0; scroll-margin-top: 115px; }
+.outreach-review { padding: 23px; }
+.outreach-review > .outreach-section-head { margin-bottom: 22px; }
+.outreach-review .eyebrow { font-size: 10px; margin-bottom: 5px; }
+.outreach-editor { display: flex; flex-direction: column; gap: 14px; }
+.outreach-editor textarea { line-height: 1.7; }
+.outreach-editor-actions { display: flex; align-items: center; gap: 14px; }
+.outreach-editor-actions > p { color: #66727d; font-size: 11px; line-height: 1.7; }
+.outreach-editor-actions > .button { flex-shrink: 0; }
+.outreach-preview { border: 1px solid #dce3e9; border-radius: 7px; margin-block: 23px 18px; overflow: hidden; }
+.outreach-preview-head { display: flex; flex-wrap: wrap; gap: 5px 12px; align-items: center; justify-content: space-between; padding: 13px 15px; background: #f3f6f8; border-bottom: 1px solid #e1e6eb; font-size: 11px; }
+.outreach-preview-head > span { color: #5c6a77; }
+.outreach-preview-address { padding: 15px 15px 0; color: #5b6977; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.outreach-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; padding: 18px 15px; font: inherit; color: #2d3b48; font-size: 13px; line-height: 1.85; margin: 0; }
+.outreach-signature-preview { display: flex; gap: 12px; align-items: center; padding: 15px; margin: 0 15px; border: 1px solid #edf0f2; border-radius: 5px; }
+.outreach-signature-preview > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.outreach-signature-preview strong { font-size: 12px; }
+.outreach-signature-preview span { font-size: 11px; color: #536372; overflow-wrap: anywhere; }
+.outreach-preview > .outreach-small { padding: 12px 15px; }
+.outreach-preview > label { padding: 0 15px 15px; }
+.outreach-review-actions { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; margin-bottom: 15px; }
+.outreach-timeline { display: grid; grid-template-columns: 1fr; gap: 10px; padding-top: 18px; margin: 20px 0 12px; border-top: 1px solid #e4e9ed; }
+.outreach-timeline > div { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; font-size: 11px; line-height: 1.7; }
+.outreach-timeline dt { color: #647382; }
+.outreach-timeline dd { margin: 0; color: #344553; text-align: right; }
+.outreach-start-hint { background: #f6f1e6; border-color: #e8dfd0; padding: 35px 30px; }
+.outreach-start-hint h2 { font-size: 27px; color: #655d50; line-height: 1.4; margin-top: 17px; letter-spacing: -.5px; }
+.outreach-start-hint p { color: #776854; font-size: 13px; line-height: 1.9; margin-top: 20px; }
+.outreach-footnote { color: #65717d; font-size: 12px; line-height: 1.8; margin: 24px 0 10px; max-width: 880px; }
+.outreach-copy { border-top: 1px solid #e3e8ec; padding-top: 18px; margin-block: 17px; }
+.outreach-copy h3 { font-size: 14px; line-height: 1.6; margin-bottom: 6px; }
+.outreach-copy .outreach-review-actions { margin-top: 13px; }
+.outreach-reschedule { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid #e3e8ec; padding-top: 18px; margin-block: 18px; }
+.outreach-reschedule > .button { align-self: flex-start; }
+.tracking-schedule-form { border-top: 1px solid #e2ddd5; padding-top: 17px; margin-top: 17px; }
+.tracking-schedule-form > label:not(.tracking-schedule-alerts) { display: flex; flex-direction: column; gap: 7px; font-size: 12px; line-height: 1.6; font-weight: 600; }
+.tracking-schedule-form input[type="datetime-local"] { width: 100%; min-width: 0; min-height: 44px; padding: 10px; background: white; border: 1px solid #d8dfe5; border-radius: 5px; font: inherit; font-weight: 400; }
+.tracking-schedule-alerts { display: flex; align-items: flex-start; gap: 10px; margin-block: 13px; color: #596675; font-size: 12px; line-height: 1.7; }
+.tracking-schedule-alerts input { flex-shrink: 0; margin: 3px 0 0; width: 17px; height: 17px; accent-color: #ae491a; }
+.outreach-batch-prepare { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 17px 20px; margin-bottom: 22px; border: 1px solid #e5ddd0; border-radius: 8px; background: #f7f3eb; }
+.outreach-batch-prepare strong { font-size: 13px; color: #66533d; }
+.outreach-batch-prepare p { font-size: 12px; line-height: 1.7; color: #75644e; margin-top: 5px; }
+.outreach-batch-prepare .button { flex-shrink: 0; }
+@media (max-width: 1100px) {
+  .outreach-workspace { grid-template-columns: minmax(0, 1fr); }
+  .outreach-schedule-action { flex-direction: column; align-items: flex-start; gap: 10px; padding-top: 23px; }
+  .outreach-steps { grid-template-columns: repeat(2, 1fr); row-gap: 14px; }
+  .outreach-row-open { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 14px; }
+  .outreach-row-open > span:not(.outreach-status), .outreach-row-open > small { grid-column: 1; }
+  .outreach-row-open > .outreach-status { grid-column: 2; grid-row: 1 / 4; align-self: center; }
+}
+@media (max-width: 760px) and (min-width: 561px) {
+  .sidebar { flex-wrap: wrap; }
+  .sidebar nav { order: 3; flex-basis: 100%; justify-content: space-between; margin-left: 0; }
+  .sidebar-bottom { margin-left: auto; }
+}
+@media (max-width: 560px) {
+  .sidebar > nav { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .sidebar nav .nav-link { min-width: 40px; }
+  .outreach-queue .page-heading { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .outreach-queue .page-heading h1 { font-size: 27px; }
+  .outreach-mode { flex-direction: column; gap: 10px; padding: 17px; }
+  .outreach-steps { column-gap: 10px; }
+  .outreach-steps li { font-size: 11px; align-items: flex-start; }
+  .outreach-import, .outreach-schedule, .outreach-review { padding: 18px 16px; }
+  .outreach-import .outreach-section-head { flex-direction: column; }
+  .outreach-schedule > form { flex-direction: column; gap: 14px; }
+  .outreach-schedule > form > label { width: 100%; }
+  .outreach-schedule-action { width: 100%; padding-top: 0; }
+  .outreach-schedule-action .button { width: 100%; }
+  .outreach-schedule-confirm { padding: 15px; }
+  .outreach-schedule-confirm > div { align-items: stretch; flex-direction: column; gap: 8px; }
+  .outreach-schedule-confirm .text-button { justify-content: center; }
+  .outreach-list > .outreach-section-head { padding-inline: 16px; }
+  .outreach-list-tools { padding-inline: 16px; gap: 10px; }
+  .outreach-list-tools label { flex-basis: 100%; }
+  .outreach-row-open { display: flex; gap: 4px; padding-right: 13px; }
+  .outreach-row-check { width: 41px; padding-left: 14px; }
+  .outreach-row-open > .outreach-status { align-self: flex-start; }
+  .outreach-review > .outreach-section-head { flex-direction: column; gap: 10px; }
+  .outreach-editor-actions { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .outreach-editor-actions .button { width: 100%; }
+  .outreach-review-actions { align-items: stretch; flex-direction: column; gap: 8px; }
+  .outreach-review-actions .text-button { justify-content: center; }
+  .outreach-timeline > div { flex-direction: column; gap: 2px; }
+  .outreach-timeline dd { text-align: left; }
+  .outreach-start-hint { padding: 26px 22px; }
+  .outreach-start-hint h2 { font-size: 24px; }
+  .outreach-batch-prepare { align-items: stretch; flex-direction: column; gap: 13px; padding: 16px; }
+  .outreach-queue input:not([type="checkbox"]), .outreach-queue textarea, .outreach-queue select, .tracking-schedule-form input[type="datetime-local"] { font-size: 16px; }
+  .outreach-reschedule > .button { align-self: stretch; }
+}

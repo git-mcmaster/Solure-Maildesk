@@ -19,6 +19,8 @@ import type {
   Settings,
 } from "../server/types";
 import { emailContent, imageAddresses, optOutContent, type EmailImageFormat } from "./signature";
+import OutreachQueue from "./OutreachQueue";
+import { scheduleIso } from "./outreach-import";
 
 type IconName =
   | "grid"
@@ -127,6 +129,16 @@ const statusNames: Record<PixelStatus, string> = {
   paused: "Inactive",
   archived: "Archived",
 };
+function pixelStatusLabel(pixel: Pixel): string {
+  if (pixel.outreachId && pixel.doNotContact) return "Do not contact";
+  if (pixel.status === "armed" && pixel.armedAt && new Date(pixel.armedAt).getTime() > Date.now()) return "Scheduled";
+  if (pixel.outreachId && pixel.status !== "armed") return "Review queue";
+  return statusNames[pixel.status];
+}
+function plannedInputTime(value: string | null = null): string {
+  const date = value ? new Date(value) : new Date(Date.now() + 5 * 60_000);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}T${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
 const deliveryNames: Record<string, string> = {
   none: "No alert yet",
   pending: "Queued",
@@ -338,6 +350,7 @@ function Dialog({
 }
 
 export default function App() {
+  const [workspaceView, setWorkspaceView] = useState<"messages" | "outreach">("messages");
   const [data, setData] = useState<Bootstrap | null>(null);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
@@ -386,6 +399,8 @@ export default function App() {
   const reportsExpandedRef = useRef(false);
   const reportsPendingRef = useRef(false);
   const [copyNotice, setCopyNotice] = useState("");
+  const [plannedSendTime, setPlannedSendTime] = useState(() => plannedInputTime());
+  const [scheduleEmailAlerts, setScheduleEmailAlerts] = useState(false);
   const [emailFormat, setEmailFormat] = useState<EmailImageFormat>("signature");
   const [previewImages, setPreviewImages] = useState(true);
   const [includeOptOut, setIncludeOptOut] = useState(true);
@@ -687,6 +702,8 @@ export default function App() {
     setPixelReportLoading(true);
     selectedIdRef.current = pixel.id;
     setCopyNotice("");
+    setPlannedSendTime(plannedInputTime(pixel.scheduledSendAt));
+    setScheduleEmailAlerts(data?.settings.emailEnabled ?? false);
     setIncludeOptOut(true);
   }
   async function createPixel() {
@@ -701,7 +718,7 @@ export default function App() {
       await loadList();
       choose(pixel);
       setToast(
-        "Pixel created inactive. Prepare your email with tracking off, then start immediately before you press Send.",
+        "Pixel created inactive. Prepare your email with tracking off, then start immediately or schedule tracking around your Outlook send time.",
       );
       window.setTimeout(
         () =>
@@ -736,13 +753,28 @@ export default function App() {
       });
       setToast(
         status === "armed"
-          ? "Tracking is active and email alerts are on. The first new image load after this start can email you."
+          ? pixel.armedAt && new Date(pixel.armedAt).getTime() > Date.now()
+            ? "Tracking remains scheduled. Email alerts will apply after its start time."
+            : "Tracking is active and email alerts are on. The first new image load after this start can email you."
           : status === "paused"
             ? "Tracking stopped. New image loads won’t be saved or create load emails. Your history is kept."
             : status === "archived"
               ? "Message archived. Tracking is off and your history is kept."
               : "Message details saved.",
       );
+    });
+  }
+  async function schedulePixelTracking(event: FormEvent) {
+    event.preventDefault();
+    if (!selected || selected.outreachId) return;
+    await action("schedule-tracking", async () => {
+      if (dirty) throw new Error("Save the message’s recipient and details before scheduling tracking.");
+      const sendAt = scheduleIso(plannedSendTime);
+      const pixel = await request<Pixel>(`/api/pixels/${selected.id}/schedule`, { method: "POST", body: JSON.stringify({ sendAt, ...(scheduleEmailAlerts ? { enableEmailAlerts: true } : {}) }) });
+      setSelectedRecord(pixel);
+      await load();
+      await loadList();
+      setToast(`Tracking starts ${formatDate(pixel.armedAt, true)}, 45 seconds after your planned send. Schedule the email separately in Outlook.`);
     });
   }
   async function createOptOutLink() {
@@ -781,8 +813,10 @@ export default function App() {
     if (!selected || !data || copyBlocked) return;
     const { html, plainText } = emailContent(selected.pixelUrl, data.ownerEmail, emailFormat, includeOptOut ? selected.optOutUrl : null);
     const trackingNotice = selected.status === "armed"
-      ? "Tracking is active. Composer previews or scanners may be the first recorded load. "
-      : "Tracking stays off while you prepare. Start when ready to send. ";
+      ? selected.armedAt && new Date(selected.armedAt).getTime() > Date.now()
+        ? `Tracking is scheduled for ${formatDate(selected.armedAt, true)}. Earlier image requests are ignored. `
+        : "Tracking is active. Composer previews or scanners may be the first recorded load. "
+      : "Tracking stays off while you prepare. Start immediately or schedule it around your Outlook send time. ";
     try {
       if (rich && "ClipboardItem" in window && navigator.clipboard?.write) {
         await navigator.clipboard.write([
@@ -868,6 +902,7 @@ export default function App() {
     });
   }
   const filtered = listItems;
+  const selectedTrackingScheduled = !!selected && selected.status === "armed" && !!selected.armedAt && new Date(selected.armedAt).getTime() > Date.now();
   const dirty =
     !!selected &&
     (draft.label !== selected.label ||
@@ -909,7 +944,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
-        Skip to messages
+        Skip to workspace
       </a>
       <aside className="sidebar" aria-label="Primary navigation">
         <a href="/" className="brand" aria-label="Solure Maildesk home">
@@ -926,14 +961,18 @@ export default function App() {
         <div className="workspace-label">YOUR WORKSPACE</div>
         <nav>
           <button
-            className={filter !== "archived" ? "nav-link selected" : "nav-link"}
+            className={workspaceView === "messages" && filter !== "archived" ? "nav-link selected" : "nav-link"}
             onClick={() => {
+              setWorkspaceView("messages");
               setFilter("active");
               setSearch("");
             }}
           >
             <Icon name="grid" /> Messages{" "}
             <span className="nav-count">{data.stats.total}</span>
+          </button>
+          <button className={workspaceView === "outreach" ? "nav-link selected" : "nav-link"} aria-current={workspaceView === "outreach" ? "page" : undefined} onClick={() => setWorkspaceView("outreach")}>
+            <Icon name="mail" /> Review queue
           </button>
           <button
             className="nav-link"
@@ -951,8 +990,8 @@ export default function App() {
             <Icon name="report" /> Reports
           </button>
           <button
-            className={filter === "archived" ? "nav-link selected" : "nav-link"}
-            onClick={() => setFilter("archived")}
+            className={workspaceView === "messages" && filter === "archived" ? "nav-link selected" : "nav-link"}
+            onClick={() => { setWorkspaceView("messages"); setFilter("archived"); }}
           >
             <Icon name="archive" /> Archive
           </button>
@@ -999,6 +1038,8 @@ export default function App() {
           </div>
         </header>
         <main id="main" className="main-content">
+          <div hidden={workspaceView !== "outreach"}><OutreachQueue ownerEmail={data.ownerEmail} pixelBaseUrl={data.pixelBaseUrl} development={data.development} active={workspaceView === "outreach"} onPixelsChanged={load} /></div>
+          {workspaceView !== "outreach" && <>
           <div className="page-heading">
             <div>
               <div className="eyebrow">A LITTLE MORE CLARITY</div>
@@ -1158,7 +1199,7 @@ export default function App() {
                       </span>
                       <span className={`status status-${pixel.status}`}>
                         <span />
-                        {statusNames[pixel.status]}
+                        {pixelStatusLabel(pixel)}
                       </span>
                       <span
                         className="row-activity"
@@ -1256,22 +1297,33 @@ export default function App() {
                   <h2>{selected.label || "Untitled message"}</h2>
                   <div className={`status status-${selected.status}`}>
                     <span />
-                    {statusNames[selected.status]}
+                    {pixelStatusLabel(selected)}
                   </div>
                   {selected.doNotContact && (
                     <div className="contact-blocked-warning" role="status">
                       <strong><Icon name="shield" size={17} /> Do not contact this address</strong>
-                      <p>This recipient has opted out of sales emails. New tracking sessions and copy tools are blocked. Existing tracking and history are unchanged. Maildesk cannot prevent you sending manually in Outlook.</p>
+                      <p>This recipient has opted out of sales emails. Further image capture and new tracking sessions are blocked, and saved history stays. Maildesk cannot prevent you sending manually in Outlook.</p>
                       <button className="text-button" onClick={() => setDialog("contacts")}>View do-not-contact list</button>
                     </div>
                   )}
-                  <section className="tracking-control" data-active={selected.status === "armed"} aria-label="Tracking control">
+                  {selected.outreachId ? <section className="tracking-control" aria-label="Scheduled tracking control">
+                    <div className="tracking-control-heading"><Icon name="mail" size={18} /><strong>Managed in your review queue</strong></div>
+                    <p>{selected.doNotContact ? "New image capture is blocked for this opted-out recipient. Existing saved history stays available." : selected.status === "armed" && selected.armedAt
+                      ? new Date(selected.armedAt).getTime() > Date.now()
+                        ? `Tracking is waiting until ${formatDate(selected.armedAt, true)}. Earlier image requests are ignored.`
+                        : "This image’s approved tracking window has started. Review its schedule and notification status in the queue."
+                      : "This image belongs to a prepared message. Its approved recipient and scheduled delay are protected from manual changes here."}</p>
+                    <button className="button secondary full-width" onClick={() => setWorkspaceView("outreach")}>Open review queue</button>
+                    <p className="tracking-control-note">Maildesk schedules tracking only. Send or schedule the actual email separately in Outlook.</p>
+                  </section> : <section className="tracking-control" data-active={selected.status === "armed" && !selectedTrackingScheduled} aria-label="Tracking control">
                     <div className="tracking-control-heading">
                       <Icon name={selected.status === "armed" ? "activity" : "pause"} size={18} />
-                      <strong>{selected.status === "armed" ? "Tracking is on" : "Tracking is off"}</strong>
+                      <strong>{selectedTrackingScheduled ? "Tracking is scheduled" : selected.status === "armed" ? "Tracking is on" : "Tracking is off"}</strong>
                     </div>
                     <p>
-                      {selected.status === "armed"
+                      {selectedTrackingScheduled
+                        ? `Tracking starts ${formatDate(selected.armedAt, true)}, 45 seconds after your planned Outlook send time. Earlier image requests are ignored.`
+                        : selected.status === "armed"
                         ? data.settings.emailEnabled
                           ? "New image loads are saved. The first new load after each start can email you."
                           : "New image loads are saved, but image-load emails are paused for all messages."
@@ -1296,11 +1348,11 @@ export default function App() {
                         )}
                         {selected.status === "armed" && (
                           <button className={`button ${data.settings.emailEnabled ? "primary" : "secondary"} full-width`} onClick={() => void updatePixel("paused")} disabled={!!busy || offline}>
-                            <Icon name="pause" size={17} /> {busy === "paused" ? "Stopping…" : "Stop tracking"}
+                            <Icon name="pause" size={17} /> {busy === "paused" ? "Stopping…" : selectedTrackingScheduled ? "Cancel tracking schedule" : "Stop tracking"}
                           </button>
                         )}
-                        {!data.notificationConfigured && <p className="tracking-control-note">Email sending needs configuration before tracking and email alerts can start.</p>}
-                        {selected.status === "armed" && (
+                        {!data.notificationConfigured && <p className="tracking-control-note">Email alerts need configuration. You can schedule tracking below without email alerts.</p>}
+                        {selected.status === "armed" && !selectedTrackingScheduled && (
                           <p className="tracking-control-note">
                             {selected.notificationStatus === "none"
                               ? selected.activationAlertAt
@@ -1313,8 +1365,19 @@ export default function App() {
                         )}
                       </>
                     )}
-                    <p className="tracking-control-note">Copying doesn’t start tracking. Start when ready to send; previews after starting can still count.</p>
-                  </section>
+                    {selected.status !== "archived" && <form className="tracking-schedule-form" onSubmit={(event) => void schedulePixelTracking(event)}>
+                      <label>Outlook scheduled send time<input type="datetime-local" required value={plannedSendTime} disabled={!!busy || offline} onChange={(event) => setPlannedSendTime(event.target.value)} /></label>
+                      <p className="tracking-control-note">{Intl.DateTimeFormat().resolvedOptions().timeZone} · tracking begins 45 seconds later. Set the email’s send time separately in Outlook.</p>
+                      <label className="tracking-schedule-alerts"><input type="checkbox" checked={scheduleEmailAlerts} disabled={!!busy || offline || !data.notificationConfigured} onChange={(event) => setScheduleEmailAlerts(event.target.checked)} /><span>Use Maildesk’s image-load email alerts. This resumes email alerts if they’re paused.</span></label>
+                      {!data.settings.emailEnabled && !scheduleEmailAlerts && <p className="tracking-control-note">Image-load emails are paused in Settings. Scheduled tracking can still save activity.</p>}
+                      {!validSavedRecipient && <p className="tracking-control-note">Add and save a complete recipient before scheduling so the do-not-contact check can protect this message.</p>}
+                      {dirty && <p className="tracking-control-note">Save your message details before scheduling tracking.</p>}
+                      <button className="button secondary full-width" type="submit" disabled={!!busy || offline || dirty || !validSavedRecipient || selected.doNotContact}>{busy === "schedule-tracking" ? "Saving schedule…" : selectedTrackingScheduled ? "Change tracking schedule" : "Schedule tracking + 45 seconds"}</button>
+                      <p className="tracking-control-note">Changing or cancelling this schedule does not change Outlook’s email. Update both places if the planned send time changes. The saved tracking time works even when this dashboard is closed.</p>
+                    </form>}
+                    <p className="tracking-control-note">Copying doesn’t start tracking. Start immediately or schedule it above; previews after tracking starts can still count.</p>
+                  </section>}
+                  {!selected.outreachId && <>
                   <div className="workflow-step">
                     <span className="step-number">1</span>
                     <div>
@@ -1517,6 +1580,7 @@ export default function App() {
                       {busy === "save" ? "Saving…" : "Save details"}
                     </button>
                   </form>
+                  </>}
                   <div className="pixel-retention">
                     <strong>Record retention</strong>
                     {selected.hasRecordedLoad ? (
@@ -1648,8 +1712,8 @@ export default function App() {
                       {" "}Times use your browser’s time zone; request location is approximate and may belong to a proxy. A load does not confirm reading.
                     </p>
                   )}
-                  <div className="detail-actions">
-                    {selected.status !== "archived" && (
+                  {(!selected.outreachId || ["cancelled", "blocked"].includes(selected.outreachState ?? "")) && <div className="detail-actions">
+                    {!selected.outreachId && selected.status !== "archived" && (
                       <button
                         className="text-button"
                         disabled={!!busy || offline}
@@ -1658,7 +1722,7 @@ export default function App() {
                         <Icon name="archive" size={15} /> Archive
                       </button>
                     )}
-                    {selected.status === "archived" && (
+                    {!selected.outreachId && selected.status === "archived" && (
                       <button
                         className="text-button"
                         disabled={!!busy || offline}
@@ -1681,7 +1745,7 @@ export default function App() {
                         Clear activity
                       </button>
                     )}
-                  </div>
+                  </div>}
                 </section>
               ) : (
                 <>
@@ -1747,6 +1811,7 @@ export default function App() {
             </span>
             <span>Private by design.</span>
           </footer>
+          </>}
         </main>
       </div>
       {toast && (

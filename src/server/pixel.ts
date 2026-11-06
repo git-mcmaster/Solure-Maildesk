@@ -30,6 +30,7 @@ export async function fetchPixel(request: Request, env: Env): Promise<Response> 
       SELECT ?,p.id,?,'after_arming',
         CASE WHEN (SELECT capture_request_details FROM settings WHERE id=1)=1 THEN ? ELSE NULL END
       FROM pixels p WHERE p.token=? AND p.status='armed' AND p.activation_id IS NOT NULL AND p.armed_at IS NOT NULL AND p.armed_at<=?
+      AND NOT EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(p.recipient)))
       AND CASE WHEN p.daily_load_day=? THEN p.daily_load_count ELSE 0 END<200
       AND (SELECT CASE WHEN event_day=? THEN event_count ELSE 0 END FROM settings WHERE id=1)<10000`)
       .bind(crypto.randomUUID(), now, metadata, match![1], now, day, day).run();
