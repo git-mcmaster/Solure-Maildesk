@@ -1,6 +1,6 @@
-# Microsoft connection — local implementation, November 8, 2026
+# Microsoft connection — November 8, 2026
 
-This connection is implemented locally. It has not registered an Entra application, granted Microsoft permissions, stored live credentials, changed production storage, sent an email or been deployed. Connection readiness is separate from message approval, sending authorization and native Gmail unsubscribe verification.
+The connection code and additive storage are deployed with prospect sending explicitly disabled. No Entra app is registered, Microsoft mailbox permission granted, live credential stored or real test/prospect email submitted. The correct tenant/owner was inspected read-only and the single-tenant Web registration form is prepared, awaiting the owner’s action-time approval of Microsoft’s Platform Policies. Connection readiness is separate from message approval, sending authorization and native Gmail unsubscribe verification.
 
 ## What the connection permits
 

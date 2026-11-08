@@ -1,8 +1,8 @@
 # Planned send time and delayed tracking
 
-## Connected automation status — November 8, local only
+## Connected automation status — November 8
 
-The new [connected workflow](AUTOMATION.md) combines preparation, approval, actual Microsoft sending, opt-outs and tracking without a second Outlook schedule. It is implemented locally and has not been released or connected. The manual workflow below continues to describe the deployed system. Do not duplicate a connected send with a manual Outlook schedule or silently adopt another chat’s drafts.
+The new [connected workflow](AUTOMATION.md) combines preparation, approval, actual Microsoft sending, opt-outs and tracking without a second Outlook schedule. It is deployed with prospect sending disabled and Microsoft disconnected, pending owner consent and a real acceptance test. The manual workflow below remains available. Do not duplicate a connected send with a manual Outlook schedule or silently adopt another chat’s drafts.
 
 ## What the owner approved
 
