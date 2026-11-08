@@ -3,8 +3,11 @@ import { plannedTrackingTime } from './scheduling';
 import { cancelInactiveNotifications } from './notifications';
 import { normalizedRecipient, isDoNotContact } from './opt-out';
 import { emailContent } from '../client/signature';
+import { prepareUnsubscribeHeaders, type PreparedUnsubscribeHeaders } from '../shared/unsubscribe';
 import { DEFAULT_TRACKING_DELAY_SECONDS, type OutreachInput, type OutreachItem, type OutreachPage, type OutreachState } from '../shared/outreach';
 import type { Env } from './types';
+import { hasManagedDelivery, listDeliveriesForJobs } from './automation';
+import type { AutomaticDelivery } from '../shared/automation';
 
 interface JobRow {
   id: string; version: number; state: OutreachState | 'submitting' | 'awaiting_confirmation' | 'cooldown'; label: string; recipient: string; subject: string; body: string;
@@ -25,16 +28,16 @@ const origin = (value: string) => value.replace(/\/$/u, '');
 const randomToken = (size: number) => Array.from(crypto.getRandomValues(new Uint8Array(size)), value => value.toString(16).padStart(2, '0')).join('');
 const escapeHtml = (value: string) => value.replace(/[&<>"']/gu, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 
-function item(row: JobRow, env: Env): OutreachItem {
+function item(row: JobRow, env: Env, automaticDelivery: AutomaticDelivery | null = null): OutreachItem {
   let state: OutreachState = ['submitting', 'awaiting_confirmation', 'cooldown'].includes(row.state) ? 'needs_attention' : row.state as OutreachState;
   if (state === 'scheduled' && row.tracking_starts_at && row.tracking_starts_at <= new Date().toISOString()) state = row.pixel_status === 'armed' && row.pixel_token ? 'tracking' : 'needs_attention';
-  return { id: row.id, version: row.version, canEdit: isEditable(row), state, label: row.label, recipient: row.recipient,
+  return { id: row.id, version: row.version, canEdit: !automaticDelivery && isEditable(row), state, label: row.label, recipient: row.recipient,
     subject: row.subject, body: row.body, createdAt: row.created_at, updatedAt: row.updated_at,
     approvedAt: row.approved_at, scheduledAt: row.scheduled_at, trackingStartsAt: row.tracking_starts_at,
     delaySeconds: row.delay_seconds, pixelId: row.pixel_id,
     pixelUrl: row.pixel_token ? `${origin(env.PIXEL_ORIGIN)}/p/${row.pixel_token}.gif` : null,
     optOutUrl: row.opt_out_url, preparedHtml: row.prepared_html, preparedText: row.prepared_text,
-    doNotContact: row.do_not_contact === 1, lastError: row.last_error };
+    doNotContact: row.do_not_contact === 1, lastError: row.last_error, automaticDelivery };
 }
 async function getJob(env: Env, id: string): Promise<JobRow> {
   if (!idPattern.test(id)) throw new HttpError(404, 'NOT_FOUND', 'This review item could not be found.');
@@ -85,7 +88,9 @@ async function readImport(request: Request): Promise<Record<string, unknown>> {
 }
 export async function listOutreach(env: Env): Promise<OutreachPage> {
   const rows = await env.DB.prepare(`${select} ORDER BY j.created_at DESC,j.id DESC LIMIT 500`).all<JobRow>();
-  return { items: rows.results.map(row => item(row, env)), scheduling: { mode: 'planned-time',
+  const deliveries = rows.results.length ? await listDeliveriesForJobs(env, rows.results.map(row => row.id)) : [];
+  const byJob = new Map(deliveries.map(delivery => [delivery.jobId, delivery]));
+  return { items: rows.results.map(row => item(row, env, byJob.get(row.id) ?? null)), scheduling: { mode: 'planned-time',
     description: 'Set the same planned send time in Outlook. Tracking starts 45 seconds later. Maildesk does not send email or confirm that Outlook sent it.' } };
 }
 async function importDrafts(request: Request, env: Env) {
@@ -166,11 +171,13 @@ async function cancelDraft(row: JobRow, body: Record<string, unknown>, env: Env)
   const now = new Date().toISOString();
   const results = await env.DB.batch([
     env.DB.prepare(`UPDATE pixels SET status='paused',scheduled_send_at=NULL,updated_at=? WHERE id IN
-      (SELECT pixel_id FROM outreach_jobs WHERE id=? AND version=?)`).bind(now, row.id, expected),
+      (SELECT pixel_id FROM outreach_jobs WHERE id=? AND version=?
+        AND NOT EXISTS (SELECT 1 FROM outreach_deliveries a WHERE a.job_id=outreach_jobs.id))`).bind(now, row.id, expected),
     env.DB.prepare(`UPDATE outreach_jobs SET state='cancelled',approved_at=NULL,approved_version=NULL,
       scheduled_at=CASE WHEN tracking_starts_at>? THEN NULL ELSE scheduled_at END,
       tracking_starts_at=CASE WHEN tracking_starts_at>? THEN NULL ELSE tracking_starts_at END,
-      updated_at=?,last_error=NULL WHERE id=? AND version=?`).bind(now, now, now, row.id, expected),
+      updated_at=?,last_error=NULL WHERE id=? AND version=?
+        AND NOT EXISTS (SELECT 1 FROM outreach_deliveries a WHERE a.job_id=outreach_jobs.id)`).bind(now, now, now, row.id, expected),
     env.DB.prepare(cancelInactiveNotifications),
   ]);
   if (!results[1]?.meta.changes) throw new HttpError(409, 'VERSION_CHANGED', 'This item changed. Refresh before stopping its tracking plan.');
@@ -188,6 +195,29 @@ function selectedItems(value: unknown): { id: string; version: number }[] {
   if (new Set(selected.map(entry => entry.id)).size !== selected.length) throw new HttpError(400, 'INVALID_SCHEDULE', 'Select each draft once.');
   return selected;
 }
+
+async function approveBatch(body: Record<string, unknown>, env: Env): Promise<Response> {
+  onlyFields(body, ['items', 'confirmReviewed']);
+  if (body.confirmReviewed !== true) throw new HttpError(400, 'REVIEW_REQUIRED', 'Review the complete selected messages before approving them. This does not authorize sending.');
+  const selected = selectedItems(body.items), selectedJson = JSON.stringify(selected), now = new Date().toISOString();
+  // One statement approves the whole current eligible set or none. It never
+  // substitutes a newer version for what the owner actually reviewed.
+  const saved = await env.DB.prepare(`WITH selected AS MATERIALIZED
+      (SELECT json_extract(value,'$.id') AS id,json_extract(value,'$.version') AS version FROM json_each(?)),
+    eligible AS MATERIALIZED (SELECT j.id FROM outreach_jobs j JOIN selected s ON s.id=j.id AND s.version=j.version
+      JOIN pixels p ON p.id=j.pixel_id AND lower(trim(p.recipient))=j.recipient
+      WHERE j.state='prepared' AND j.prepared_html IS NOT NULL AND j.prepared_text IS NOT NULL
+        AND j.opt_out_url IS NOT NULL
+        AND EXISTS (SELECT 1 FROM opt_out_links l WHERE l.pixel_id=p.id AND l.recipient=j.recipient
+          AND j.opt_out_url=?||'/outreach/stop/'||l.token)
+        AND NOT EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=j.recipient)
+        AND NOT EXISTS (SELECT 1 FROM outreach_deliveries a WHERE a.job_id=j.id))
+    UPDATE outreach_jobs SET state='approved',approved_at=?,approved_version=version,updated_at=?
+    WHERE id IN (SELECT id FROM eligible) AND (SELECT COUNT(*) FROM eligible)=?`)
+    .bind(selectedJson, origin(env.PIXEL_ORIGIN), now, now, selected.length).run();
+  if (saved.meta.changes !== selected.length) throw new HttpError(409, 'APPROVAL_CHANGED', 'A selected version changed, was already approved, lost its recipient pairing or opted out. Nothing was approved; refresh the batch.');
+  return json(await listOutreach(env));
+}
 async function scheduleDrafts(body: Record<string, unknown>, env: Env) {
   onlyFields(body, ['items', 'sendAt', 'delaySeconds']);
   if (body.delaySeconds !== DEFAULT_TRACKING_DELAY_SECONDS) throw new HttpError(400, 'INVALID_DELAY', 'Tracking starts 45 seconds after your planned Outlook send time.');
@@ -200,6 +230,7 @@ async function scheduleDrafts(body: Record<string, unknown>, env: Env) {
   for (const row of rows) {
     requireVersion(row, selected.find(entry => entry.id === row.id)!.version);
     if (row.state !== 'approved' || row.approved_version !== row.version || row.do_not_contact || !row.pixel_id || !row.prepared_html) throw new HttpError(409, 'NOT_SCHEDULABLE', 'Every selected draft must have current approval, a prepared image and no opt-out.');
+    if (await hasManagedDelivery(env, row.id)) throw new HttpError(409, 'AUTOMATIC_DELIVERY_MANAGED', 'Manage this message in Automatic sending. Do not schedule a second copy in Outlook.');
   }
   const activation = crypto.randomUUID();
   // Materialize the complete eligible set before changing either table. A DNC
@@ -209,6 +240,8 @@ async function scheduleDrafts(body: Record<string, unknown>, env: Env) {
         (SELECT json_extract(value,'$.id') AS id,json_extract(value,'$.version') AS version FROM json_each(?)),
       eligible AS MATERIALIZED (SELECT j.pixel_id FROM outreach_jobs j JOIN selected s ON s.id=j.id AND s.version=j.version
         WHERE j.approved_version=j.version AND j.state='approved' AND j.prepared_html IS NOT NULL AND j.prepared_text IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM outreach_deliveries a WHERE a.job_id=j.id)
+          AND NOT EXISTS (SELECT 1 FROM outreach_deliveries a WHERE a.recipient=j.recipient AND a.state IN ('pending','submitting'))
           AND EXISTS (SELECT 1 FROM pixels p WHERE p.id=j.pixel_id AND lower(trim(p.recipient))=j.recipient AND p.status!='armed')
           AND NOT EXISTS (SELECT 1 FROM outreach_jobs pending WHERE pending.recipient=j.recipient AND pending.id NOT IN (SELECT id FROM selected)
             AND pending.state='scheduled' AND pending.tracking_starts_at>?)
@@ -218,6 +251,7 @@ async function scheduleDrafts(body: Record<string, unknown>, env: Env) {
       .bind(selectedJson, now, sendAt, startsAt, activation, now, selected.length),
     env.DB.prepare(`UPDATE outreach_jobs SET state='scheduled',scheduled_at=?,tracking_starts_at=?,delay_seconds=45,updated_at=?,last_error=NULL
       WHERE id IN (SELECT json_extract(value,'$.id') FROM json_each(?)) AND state='approved' AND approved_version=version
+        AND NOT EXISTS (SELECT 1 FROM outreach_deliveries a WHERE a.job_id=outreach_jobs.id)
         AND EXISTS (SELECT 1 FROM pixels p WHERE p.id=outreach_jobs.pixel_id AND p.activation_id=?||':'||p.id)`)
       .bind(sendAt, startsAt, now, selectedJson, activation),
     env.DB.prepare(cancelInactiveNotifications),
@@ -230,14 +264,20 @@ async function rescheduleDraft(row: JobRow, body: Record<string, unknown>, env: 
   onlyFields(body, ['version', 'sendAt']); const expected = version(body); requireVersion(row, expected);
   const { sendAt, startsAt, now } = plannedTrackingTime(body.sendAt), activation = crypto.randomUUID();
   if (row.state !== 'scheduled' || !row.tracking_starts_at || row.tracking_starts_at <= now) throw new HttpError(409, 'TRACKING_ALREADY_STARTED', 'Only pending tracking plans can be rescheduled. Stop active tracking and keep its history.');
+  if (await env.DB.prepare("SELECT 1 FROM outreach_deliveries WHERE recipient=? AND state IN ('pending','submitting')").bind(row.recipient).first()) {
+    throw new HttpError(409, 'AUTOMATIC_DELIVERY_MANAGED', 'This recipient has an automatic send queued. Manage it before changing a separate Outlook tracking plan.');
+  }
   const results = await env.DB.batch([
     env.DB.prepare(`UPDATE pixels SET scheduled_send_at=?,armed_at=?,activation_id=?,activation_alert_at=NULL,updated_at=?
       WHERE id=? AND status='armed' AND armed_at>? AND lower(trim(recipient))=?
         AND EXISTS (SELECT 1 FROM outreach_jobs j WHERE j.id=? AND j.version=? AND j.approved_version=j.version
           AND j.state='scheduled' AND j.tracking_starts_at>?)
+        AND NOT EXISTS (SELECT 1 FROM outreach_deliveries a WHERE a.recipient=lower(trim(pixels.recipient)) AND a.state IN ('pending','submitting'))
         AND NOT EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(pixels.recipient)))`)
       .bind(sendAt, startsAt, activation, now, row.pixel_id, now, row.recipient, row.id, expected, now),
     env.DB.prepare(`UPDATE outreach_jobs SET scheduled_at=?,tracking_starts_at=?,updated_at=?,last_error=NULL WHERE id=? AND version=? AND state='scheduled'
+      AND NOT EXISTS (SELECT 1 FROM outreach_deliveries a WHERE a.job_id=outreach_jobs.id)
+      AND NOT EXISTS (SELECT 1 FROM outreach_deliveries a WHERE a.recipient=outreach_jobs.recipient AND a.state IN ('pending','submitting'))
       AND EXISTS (SELECT 1 FROM pixels p WHERE p.id=outreach_jobs.pixel_id AND p.activation_id=?)`)
       .bind(sendAt, startsAt, now, row.id, expected, activation),
     env.DB.prepare(cancelInactiveNotifications),
@@ -246,15 +286,55 @@ async function rescheduleDraft(row: JobRow, body: Record<string, unknown>, env: 
   return json(item(await getJob(env, row.id), env));
 }
 
+async function unsubscribeHeaders(row: JobRow, params: URLSearchParams, env: Env): Promise<Response> {
+  const value = params.get('version');
+  if ([...params.keys()].some(key => key !== 'version') || params.getAll('version').length !== 1
+    || !value || !/^[1-9][0-9]{0,15}$/u.test(value) || !Number.isSafeInteger(Number(value))) {
+    throw new HttpError(400, 'INVALID_QUERY', 'Choose the current approved message version.');
+  }
+  const expected = Number(value);
+  requireVersion(row, expected);
+  if (row.do_not_contact === 1) throw new HttpError(409, 'DO_NOT_CONTACT', noContact);
+  if (!['approved', 'scheduled', 'tracking'].includes(row.state) || row.approved_version !== expected
+    || !row.pixel_id || !row.opt_out_url || !row.prepared_html || !row.prepared_text) {
+    throw new HttpError(409, 'NOT_APPROVED', 'Approve the complete current message before preparing email headers.');
+  }
+  let prepared;
+  try { prepared = prepareUnsubscribeHeaders(row.opt_out_url, env.PIXEL_ORIGIN); }
+  catch {
+    throw new HttpError(409, 'INVALID_UNSUBSCRIBE_ORIGIN', 'One-click headers require the HTTPS public origin and this message’s unchanged recipient-bound opt-out link. Local HTTP previews cannot supply production headers.');
+  }
+  // A footer URL is not proof of its recipient pairing. Recheck the persisted
+  // link, pixel, approval and suppression together after the initial row read.
+  const paired = await env.DB.prepare(`SELECT j.id FROM outreach_jobs j
+    JOIN opt_out_links l ON l.token=? AND l.pixel_id=j.pixel_id AND l.recipient=j.recipient
+    JOIN pixels p ON p.id=j.pixel_id AND lower(trim(p.recipient))=j.recipient
+    WHERE j.id=? AND j.version=? AND j.approved_version=j.version
+      AND j.state IN ('approved','scheduled','tracking') AND j.recipient=? AND j.opt_out_url=? AND j.pixel_id=?
+      AND j.prepared_html IS NOT NULL AND j.prepared_text IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=j.recipient)`)
+    .bind(prepared.oneClickUrl.slice(-64), row.id, expected, row.recipient, row.opt_out_url, row.pixel_id).first();
+  if (!paired) throw new HttpError(409, 'UNSUBSCRIBE_CHANGED', 'The approved version, recipient pairing or do-not-contact preference changed. Refresh before copying headers.');
+  const result: PreparedUnsubscribeHeaders = { ...prepared, outreachId: row.id, version: expected, recipient: row.recipient,
+    status: 'prepared-only', transportVerified: false, dkimSigningRequired: true };
+  return json(result);
+}
+
 /** Owner authentication and mutation-origin checks run before this router. */
 export async function outreachApi(request: Request, env: Env): Promise<Response> {
-  const path = new URL(request.url).pathname, method = request.method;
+  const url = new URL(request.url), path = url.pathname, method = request.method;
   if (path === '/api/outreach' && method === 'GET') return json(await listOutreach(env));
   if (path === '/api/outreach/import' && method === 'POST') return importDrafts(request, env);
+  if (path === '/api/outreach/approve-batch' && method === 'POST') return approveBatch(await readJson(request), env);
   if (path === '/api/outreach/schedule' && method === 'POST') return scheduleDrafts(await readJson(request), env);
+  const headers = /^\/api\/outreach\/([^/]+)\/unsubscribe-headers$/u.exec(path);
+  if (headers && method === 'GET') return unsubscribeHeaders(await getJob(env, headers[1]!), url.searchParams, env);
   const match = /^\/api\/outreach\/([^/]+)(?:\/(prepare|approve|cancel|reschedule))?$/u.exec(path);
   if (match) {
     const row = await getJob(env, match[1]!);
+    if ((method === 'PATCH' || method === 'POST') && await hasManagedDelivery(env, row.id)) {
+      throw new HttpError(409, 'AUTOMATIC_DELIVERY_MANAGED', 'Manage or cancel this saved send in Automatic sending. Its reviewed copy and history are protected.');
+    }
     if (method === 'PATCH' && !match[2]) return editDraft(row, await readJson(request), env);
     if (method === 'POST' && match[2]) {
       const body = await readJson(request);

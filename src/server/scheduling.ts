@@ -34,11 +34,15 @@ export async function scheduleManualPixel(env: Env, pixel: Pixel, body: Record<s
   }
   const recipient = normalizedRecipient(pixel.recipient);
   if (await isDoNotContact(env, recipient)) throw new HttpError(409, 'DO_NOT_CONTACT', 'This recipient is on the do-not-contact list.');
+  if (await env.DB.prepare("SELECT 1 FROM outreach_deliveries WHERE recipient=? AND state IN ('pending','submitting')").bind(recipient).first()) {
+    throw new HttpError(409, 'AUTOMATIC_DELIVERY_MANAGED', 'This recipient already has an automatic email queued. Manage that send before making a separate Outlook tracking plan.');
+  }
   if (body.enableEmailAlerts && !notificationConfigured(env)) throw new HttpError(409, 'NOTIFICATION_NOT_CONFIGURED', 'Configure email alerts before enabling them. Dashboard notifications already work.');
   const activation = crypto.randomUUID();
   const statements = [env.DB.prepare(`UPDATE pixels SET status='armed',scheduled_send_at=?,armed_at=?,activation_id=?,activation_alert_at=NULL,updated_at=?
     WHERE id=? AND lower(trim(recipient))=? AND (status IN ('draft','paused') OR (status='armed' AND armed_at>?))
       AND NOT EXISTS (SELECT 1 FROM outreach_jobs WHERE pixel_id=pixels.id)
+      AND NOT EXISTS (SELECT 1 FROM outreach_deliveries a WHERE a.recipient=lower(trim(pixels.recipient)) AND a.state IN ('pending','submitting'))
       AND NOT EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(pixels.recipient)))`)
     .bind(sendAt, startsAt, activation, now, pixel.id, recipient, now)];
   if (body.enableEmailAlerts) {

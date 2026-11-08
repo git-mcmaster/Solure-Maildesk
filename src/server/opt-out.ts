@@ -102,6 +102,69 @@ async function readConfirmation(request: Request): Promise<boolean> {
   return [...form.keys()].length === 1 && form.getAll('confirm').length === 1 && form.get('confirm') === 'stop';
 }
 
+async function readOneClick(request: Request): Promise<boolean> {
+  const contentType = request.headers.get('Content-Type') ?? '';
+  const mediaType = (contentType.split(';')[0] ?? '').trim().toLowerCase();
+  if (!['application/x-www-form-urlencoded', 'multipart/form-data'].includes(mediaType)) return false;
+  try {
+    const reader = request.body?.getReader();
+    if (!reader) return false;
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (true) {
+      const item = await reader.read();
+      if (item.done) break;
+      size += item.value.byteLength;
+      // Only one short field is required. Bound the body before any form parser runs.
+      if (size > 4096) { await reader.cancel(); return false; }
+      chunks.push(item.value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+    if (mediaType === 'application/x-www-form-urlencoded') {
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      if (text.split('&').length !== 1) return false;
+      const fields = [...new URLSearchParams(text).entries()];
+      return fields.length === 1 && fields[0]![0] === 'List-Unsubscribe' && fields[0]![1] === 'One-Click';
+    }
+    const form = await new Response(bytes, { headers: { 'Content-Type': contentType } }).formData();
+    const fields = [...form.entries()];
+    return fields.length === 1 && fields[0]![0] === 'List-Unsubscribe' && fields[0]![1] === 'One-Click';
+  } catch {
+    return false;
+  }
+}
+
+/** RFC 8058 capability URL. Mail services POST without a browser session or Origin. */
+export async function fetchOneClickUnsubscribe(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const match = /^\/outreach\/unsubscribe\/([a-f0-9]{64})$/u.exec(url.pathname);
+  if (!match) return page('Link unavailable', '<p>This preference link is unavailable. You can reply to the original email to request no further sales emails.</p>', 404, request.method === 'HEAD');
+  if (!['GET', 'HEAD', 'POST'].includes(request.method)) {
+    const response = page('Action unavailable', '<p>Open the link from your email to manage your preference.</p>', 405);
+    response.headers.set('Allow', 'GET, HEAD, POST');
+    return response;
+  }
+  if (request.method === 'POST' && !await readOneClick(request)) {
+    return page('Preference not changed', '<p>No preference was changed. Use the unsubscribe option in your email or open the link to confirm in your browser.</p>', 400);
+  }
+  try {
+    const link = await env.DB.prepare('SELECT 1 FROM opt_out_links WHERE token=?').bind(match[1]).first();
+    if (!link) return page('Link unavailable', '<p>This preference link is unavailable. You can reply to the original email to request no further sales emails.</p>', 404, request.method === 'HEAD');
+    if (request.method === 'POST') {
+      await env.DB.prepare(`INSERT OR IGNORE INTO do_not_contact (recipient,created_at,source)
+        SELECT recipient,?,'recipient' FROM opt_out_links WHERE token=?`).bind(new Date().toISOString(), match[1]).run();
+      return page('Your preference has been saved', '<p>The address associated with this link is on Solure’s do-not-contact list for sales emails.</p><p class="note">You can close this page. No confirmation email will be sent.</p>');
+    }
+    // A passive scanner visit is read-only; a human confirmation retains the existing CSRF guard.
+    return page('Stop outreach emails', `<p>To stop future sales emails from Solure for the address associated with this link, press the button below.</p><p class="note">Simply visiting this page does not change your preference.</p><form method="post" action="/outreach/stop/${match[1]}"><button type="submit" name="confirm" value="stop">Stop outreach emails</button></form>`, 200, request.method === 'HEAD');
+  } catch {
+    console.error('One-click unsubscribe request failed');
+    return page('Preference not changed', '<p>We could not save your preference. Please try again, or reply to the original email to request no further sales emails.</p>', 503, request.method === 'HEAD');
+  }
+}
+
 /** Public recipient page only. Reading a link never creates an event or opt-out. */
 export async function fetchOptOut(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);

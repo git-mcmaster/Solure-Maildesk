@@ -3384,6 +3384,14 @@ body {
 .outreach-copy { border-top: 1px solid #e3e8ec; padding-top: 18px; margin-block: 17px; }
 .outreach-copy h3 { font-size: 14px; line-height: 1.6; margin-bottom: 6px; }
 .outreach-copy .outreach-review-actions { margin-top: 13px; }
+.unsubscribe-setup { margin-block: 16px; border: 1px solid #dce3e9; border-radius: 7px; min-width: 0; }
+.unsubscribe-setup > summary { padding: 13px 15px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.unsubscribe-setup > summary > span { display: block; margin-top: 4px; color: #765832; font-size: 11px; font-weight: 400; }
+.unsubscribe-setup > summary:focus-visible { outline: 2px solid #ff6b20; outline-offset: 3px; }
+.unsubscribe-setup-body { padding: 0 15px 15px; font-size: 12px; line-height: 1.75; color: #536372; overflow-wrap: anywhere; }
+.unsubscribe-setup-body p + p { margin-top: 9px; }
+.unsubscribe-setup-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-block: 12px; }
+.unsubscribe-setup-body textarea { display: block; width: 100%; min-width: 0; margin-top: 6px; resize: vertical; font: 12px/1.6 ui-monospace, monospace; overflow-wrap: anywhere; white-space: pre-wrap; }
 .outreach-reschedule { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid #e3e8ec; padding-top: 18px; margin-block: 18px; }
 .outreach-reschedule > .button { align-self: flex-start; }
 .tracking-schedule-form { border-top: 1px solid #e2ddd5; padding-top: 17px; margin-top: 17px; }
@@ -3443,4 +3451,116 @@ body {
   .outreach-batch-prepare { align-items: stretch; flex-direction: column; gap: 13px; padding: 16px; }
   .outreach-queue input:not([type="checkbox"]), .outreach-queue textarea, .outreach-queue select, .tracking-schedule-form input[type="datetime-local"] { font-size: 16px; }
   .outreach-reschedule > .button { align-self: stretch; }
+}
+
+/* Connected sending and exact-version batch review. */
+.automation-panel { margin-block: 24px; padding: 26px; border: 1px solid #dce3e9; border-radius: 9px; background: #fff; min-width: 0; overflow-wrap: anywhere; }
+.automation-panel.automation-panel-collapsed { padding: 15px 20px; }
+.automation-disclosure > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; cursor: pointer; list-style: none; }
+.automation-disclosure > summary::-webkit-details-marker { display: none; }
+.automation-disclosure > summary::before { content: '▸'; color: #6e7c88; }
+.automation-disclosure[open] > summary::before { content: '▾'; }
+.automation-disclosure > summary > strong { flex: 1; min-width: 0; font-size: 14px; }
+.automation-disclosure > summary:focus-visible { outline: 2px solid #ff6b20; outline-offset: 4px; }
+.automation-summary-hint { flex-basis: 100%; padding-left: 21px; color: #6e7b87; font-size: 11px; line-height: 1.7; }
+.automation-disclosure-body { padding-top: 15px; }
+.automation-heading, .automation-connection, .automation-delivery-heading, .automation-batch-selection { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.automation-heading h2 { margin-block: 5px 8px; font-size: 22px; }
+.automation-panel p, .automation-batch-selection p { margin-top: 7px; font-size: 12px; line-height: 1.8; color: #5e6b78; }
+.automation-panel h3 { font-size: 14px; line-height: 1.6; }
+.automation-badge { flex-shrink: 0; display: inline-block; border-radius: 5px; padding: 5px 9px; background: #f2eee7; color: #7a603e; font-size: 11px; font-weight: 600; line-height: 1.6; }
+.automation-ready, .automation-state-accepted, .automation-state-sent { background: #eaf3ee; color: #436d50; }
+.automation-state-cancelled { background: #edf0f3; color: #626c77; }
+.automation-state-blocked, .automation-state-needs_attention { background: #fff0e8; color: #9b4b24; }
+.automation-connection { margin-top: 22px; padding: 18px; background: #f7f8fa; border: 1px solid #e8edf1; border-radius: 7px; }
+.automation-connection > div:first-child { min-width: 0; }
+.automation-connection strong { font-size: 13px; overflow-wrap: anywhere; }
+.automation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.automation-connection .automation-actions { flex-shrink: 0; }
+.automation-panel .button, .automation-batch-selection .button, .automation-batch-review .button { min-height: 44px; font-size: 12px; }
+.automation-setup-list { margin: 16px 0 0 20px; padding-left: 0; color: #5d6b78; font-size: 12px; line-height: 2; }
+.automation-permissions, .automation-confirmation { margin-top: 20px; padding: 20px; border: 1px solid #e3d5bd; border-radius: 7px; background: #fcf9f3; }
+.automation-check { display: flex; align-items: flex-start; gap: 10px; margin-block: 17px; font-size: 12px; line-height: 1.8; color: #3d4c59; }
+.automation-check input { flex-shrink: 0; width: 17px; height: 17px; margin-top: 3px; accent-color: #a65326; }
+.automation-check span { min-width: 0; }
+.automation-schedule { margin-top: 24px; padding-top: 23px; border-top: 1px solid #e4e9ed; }
+.automation-fields { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(120px, .75fr) minmax(0, 1fr); align-items: end; gap: 16px; margin-top: 18px; }
+.automation-fields label, .automation-reschedule label { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 12px; }
+.automation-fields input, .automation-reschedule input { min-width: 0; width: 100%; }
+.automation-fields label > span, .automation-reschedule label > span { font-size: 11px; color: #6e7b87; }
+.automation-fields > div { display: flex; flex-direction: column; gap: 9px; padding-bottom: 22px; font-size: 12px; }
+.automation-plan-list { display: grid; gap: 12px; padding-left: 22px; margin-block: 18px; }
+.automation-plan-list li { padding: 12px; border-radius: 5px; background: #fff; font-size: 12px; overflow-wrap: anywhere; }
+.automation-plan-list li > * { display: block; line-height: 1.9; }
+.automation-plan-list small { color: #6c7884; }
+.automation-history, .automation-limits { margin-top: 21px; border-top: 1px solid #e4e9ed; padding-top: 16px; }
+.automation-history > summary, .automation-limits > summary, .automation-manual-fallback > summary { cursor: pointer; font-size: 13px; font-weight: 600; line-height: 1.7; }
+.automation-history > summary > span { margin-left: 7px; color: #7a8792; font-size: 11px; }
+.automation-history > summary:focus-visible, .automation-limits > summary:focus-visible, .automation-manual-fallback > summary:focus-visible { outline: 2px solid #ff6b20; outline-offset: 4px; }
+.automation-deliveries { display: grid; gap: 12px; margin-top: 15px; }
+.automation-delivery-search { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; font-size: 12px; }
+.automation-queue-search { flex: 1 1 180px; min-width: 0; }
+.automation-planning-options { margin-top: 15px; }
+.automation-planning-options .automation-check { margin-block: 11px; }
+.automation-delivery { border: 1px solid #e3e8ec; border-radius: 7px; padding: 16px; min-width: 0; }
+.automation-delivery-heading > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.automation-delivery-heading > div > span { color: #657381; }
+.automation-delivery .automation-actions { margin-top: 9px; }
+.automation-reschedule { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; border-top: 1px solid #e4e9ed; padding-top: 14px; }
+.automation-activity { padding-left: 20px; font-size: 12px; line-height: 1.8; }
+.automation-activity li { padding-block: 8px; overflow-wrap: anywhere; }
+.automation-activity time { display: block; color: #7a8792; font-size: 11px; }
+.automation-monitoring { margin-top: 22px; border: 1px solid #e3e8ec; border-radius: 7px; padding: 17px; }
+.automation-holds { margin-top: 14px; font-size: 12px; }
+.automation-holds > summary { cursor: pointer; font-weight: 600; }
+.automation-holds ul { display: grid; gap: 10px; margin-top: 13px; padding: 0; list-style: none; }
+.automation-holds li { padding: 12px; border: 1px solid #e4e9ed; border-radius: 5px; overflow-wrap: anywhere; }
+.automation-holds li > strong, .automation-holds li > span { display: block; line-height: 1.9; }
+.automation-holds li > span { color: #75818b; font-size: 11px; }
+.automation-notices { margin-top: 14px; border-top: 1px solid #e6dfd3; padding-top: 13px; font-size: 12px; }
+.automation-notices > summary { cursor: pointer; font-weight: 600; color: #7a603e; }
+.automation-notices ul { display: grid; gap: 10px; margin-top: 12px; padding: 0; list-style: none; }
+.automation-notices li { display: flex; flex-direction: column; gap: 5px; padding: 12px; border-radius: 5px; background: #fcf9f3; line-height: 1.8; overflow-wrap: anywhere; }
+.automation-notices time { color: #7a8792; font-size: 11px; }
+.automation-manual-fallback { margin-block: 24px; border: 1px solid #dce3e9; border-radius: 7px; padding: 17px 20px; }
+.automation-manual-fallback > p { margin-top: 10px; font-size: 12px; line-height: 1.8; color: #657381; }
+.automation-manual-fallback .outreach-schedule { margin: 16px 0 0; border: 0; padding: 0; }
+.automation-manual-copy { margin-block: 18px; border-top: 1px solid #e4e9ed; padding-top: 16px; }
+.automation-manual-copy > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.automation-manual-copy > summary:focus-visible { outline: 2px solid #ff6b20; outline-offset: 4px; }
+.automation-manual-copy .outreach-copy { border: 0; padding-top: 0; }
+.automation-batch-selection { align-items: center; margin-block: 20px; padding: 18px 20px; border: 1px solid #dce3e9; border-radius: 7px; background: #f7f8fa; }
+.automation-batch-selection strong { font-size: 13px; }
+.automation-batch-review { margin-block: 22px; padding: 24px; border: 1px solid #e0c8a5; border-radius: 9px; background: #fcfaf6; min-width: 0; }
+.automation-batch-review h2 { font-size: 19px; }
+.automation-batch-review > .outreach-section-head p { font-size: 12px; line-height: 1.8; margin-top: 7px; color: #697582; }
+.automation-batch-messages { display: grid; gap: 16px; margin-top: 20px; max-height: 65vh; overflow-y: auto; padding: 2px; }
+.automation-batch-messages article { padding: 20px; border: 1px solid #e3e8ec; border-radius: 7px; background: white; min-width: 0; }
+.automation-batch-messages h3 { font-size: 14px; line-height: 1.8; }
+.automation-batch-messages p { margin-top: 8px; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.automation-batch-messages pre { margin-block: 16px; padding: 16px; border-radius: 5px; background: #f7f8fa; font-family: inherit; font-size: 12px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.automation-batch-messages .outreach-signature-preview { margin-block: 15px; }
+@media (max-width: 1100px) {
+  .automation-connection { flex-direction: column; }
+  .automation-connection .automation-actions { flex-shrink: 1; }
+  .automation-fields { grid-template-columns: minmax(0, 1fr) minmax(110px, .7fr); }
+  .automation-fields > div { grid-column: 1 / -1; padding-bottom: 0; flex-direction: row; align-items: center; justify-content: space-between; }
+}
+@media (max-width: 560px) {
+  .automation-panel, .automation-batch-review { padding: 18px 16px; }
+  .automation-heading { flex-direction: column; gap: 12px; }
+  .automation-heading h2 { font-size: 20px; }
+  .automation-connection, .automation-permissions, .automation-confirmation { padding: 15px; }
+  .automation-actions { gap: 10px; }
+  .automation-actions > .button { width: 100%; }
+  .automation-fields { display: flex; flex-direction: column; align-items: stretch; gap: 15px; }
+  .automation-fields > div { flex-direction: column; align-items: stretch; }
+  .automation-fields input, .automation-reschedule input { font-size: 16px; }
+  .automation-delivery-heading { flex-direction: column; gap: 10px; }
+  .automation-delivery { padding: 14px; }
+  .automation-batch-selection { flex-direction: column; align-items: stretch; padding: 16px; gap: 14px; }
+  .automation-batch-review > .outreach-section-head { flex-direction: column; gap: 12px; }
+  .automation-batch-messages article { padding: 14px; }
+  .automation-batch-messages pre { padding: 12px; }
+  .automation-manual-fallback { padding: 15px; }
 }
