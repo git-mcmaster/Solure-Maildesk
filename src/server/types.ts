@@ -152,6 +152,15 @@ export interface Env {
   DEV_AUTH?: string;
   EMAIL_MODE?: 'dry-run' | 'live';
   EMAIL_FROM?: string;
+  MICROSOFT_TENANT_ID?: string;
+  MICROSOFT_CLIENT_ID?: string;
+  MICROSOFT_CLIENT_SECRET?: string;
+  MICROSOFT_OWNER_ID?: string;
+  MAILBOX_TOKEN_KEY?: string;
+  /** Prospect sending stays disabled until explicitly configured and connected. */
+  OUTREACH_SENDING_ENABLED?: 'true' | 'false';
+  /** Optional rollout guard: restrict submissions to one approved test inbox. */
+  OUTREACH_TEST_RECIPIENT?: string;
   EMAIL?: { send(message: { to: string; from: string; subject: string; text: string }): Promise<{ messageId: string }> };
 }
 

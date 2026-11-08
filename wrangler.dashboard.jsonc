@@ -11,6 +11,7 @@
   "d1_databases": [{ "binding": "DB", "database_name": "solure-maildesk", "database_id": "1e984554-9e0c-455c-91be-aefaae407324", "migrations_dir": "migrations" }],
   "vars": {
     "OWNER_EMAIL": "elijah@soluredigitalworks.com",
+    "OUTREACH_SENDING_ENABLED": "false",
     "EMAIL_MODE": "live",
     "EMAIL_FROM": "reports@notifications.soluredigitalworks.com",
     "DASHBOARD_ORIGIN": "https://maildesk.soluredigitalworks.com",

@@ -5,7 +5,7 @@ import { fetchDashboard } from '../../src/server/dashboard';
 import { fetchPixel } from '../../src/server/pixel';
 import { enforceRetention } from '../../src/server/notifications';
 import type { Env, Pixel } from '../../src/server/types';
-import type { OutreachItem, OutreachPage } from '../../src/shared/outreach';
+import type { OutreachItem, OutreachPage, PreparedUnsubscribeHeaders } from '../../src/shared/outreach';
 
 let mf: Miniflare, env: Env;
 const origin = 'http://127.0.0.1:8787';
@@ -55,6 +55,94 @@ async function pixel(id: string) { return (await api<Pixel>(`/api/pixels/${id}`)
 async function image(row: { pixelUrl: string | null }, logo = false) { return fetchPixel(new Request(logo ? row.pixelUrl!.replace('.gif', '/logo.png') : row.pixelUrl!), env); }
 async function manual(recipient = 'manual@example.com') { return (await api<Pixel>('/api/pixels', 'POST', { label: 'Existing manual record', recipient })).data; }
 async function manualPlan(row: Pixel, seconds = 10, enableEmailAlerts = false) { return api<Pixel>(`/api/pixels/${row.id}/schedule`, 'POST', { sendAt: at(seconds).toISOString(), enableEmailAlerts }); }
+
+describe('approved one-click unsubscribe header preparation', () => {
+  const publicOrigin = 'https://pixel.example.com';
+  const overrides = { PIXEL_ORIGIN: publicOrigin };
+  async function ready(recipient = draft.recipient) {
+    let row = await imported({ ...draft, recipient });
+    row = (await api<OutreachItem>(`/api/outreach/${row.id}/prepare`, 'POST', { version: row.version }, overrides)).data;
+    return (await action(row, 'approve')).data;
+  }
+  function headers(row: OutreachItem, extra: Partial<Env> = {}) {
+    return api<PreparedUnsubscribeHeaders>(`/api/outreach/${row.id}/unsubscribe-headers?version=${row.version}`, 'GET', undefined, { ...overrides, ...extra });
+  }
+
+  it('reuses the exact persisted token without changing approved copy, approval, tracking or schedules', async () => {
+    const row = await ready();
+    const before = await current(row.id), beforePixel = await pixel(row.pixelId!);
+    const links = await env.DB.prepare('SELECT COUNT(*) AS n FROM opt_out_links').first<number>('n');
+    const result = await headers(row);
+    expect(result.response.status).toBe(200);
+    expect(result.response.headers.get('Cache-Control')).toBe('no-store');
+    expect(result.data).toMatchObject({ outreachId: row.id, version: row.version, recipient: row.recipient,
+      oneClickUrl: row.optOutUrl!.replace('/outreach/stop/', '/outreach/unsubscribe/'), status: 'prepared-only', transportVerified: false, dkimSigningRequired: true });
+    expect(result.data.headers['List-Unsubscribe']).toBe(`<${result.data.oneClickUrl}>`);
+    expect(result.data.headerText).toContain('\r\nList-Unsubscribe-Post: List-Unsubscribe=One-Click');
+    expect((await headers(row)).data).toEqual(result.data);
+    expect(await current(row.id)).toEqual(before);
+    expect(await pixel(row.pixelId!)).toEqual(beforePixel);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM opt_out_links').first<number>('n')).toBe(links);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM do_not_contact').first<number>('n')).toBe(0);
+  });
+
+  it('requires an exact approved version, strict query and HTTPS before returning header tokens', async () => {
+    const row = await imported();
+    expect((await headers(row)).error?.code).toBe('NOT_APPROVED');
+    const prepared = (await api<OutreachItem>(`/api/outreach/${row.id}/prepare`, 'POST', { version: row.version }, overrides)).data;
+    expect((await headers(prepared)).error?.code).toBe('NOT_APPROVED');
+    const approvedRow = (await action(prepared, 'approve')).data;
+    for (const query of ['', '?version=0', '?version=1&version=1', '?version=1&recipient=other@example.com', '?version=1.0', '?version=9007199254740992']) {
+      expect((await api(`/api/outreach/${row.id}/unsubscribe-headers${query}`, 'GET', undefined, overrides)).response.status).toBe(400);
+    }
+    expect((await api(`/api/outreach/${row.id}/unsubscribe-headers?version=2`, 'GET', undefined, overrides)).error?.code).toBe('VERSION_CHANGED');
+    expect((await headers(approvedRow, { PIXEL_ORIGIN: env.PIXEL_ORIGIN })).error?.code).toBe('INVALID_UNSUBSCRIBE_ORIGIN');
+    expect((await api(`/api/outreach/${row.id}/unsubscribe-headers?version=1`, 'POST', {}, overrides)).response.status).toBe(404);
+  });
+
+  it('rejects a same-origin URL whose persisted token belongs to a different recipient or pixel', async () => {
+    const row = await ready(), other = await ready('other@example.com');
+    await env.DB.prepare('UPDATE outreach_jobs SET opt_out_url=? WHERE id=?').bind(other.optOutUrl, row.id).run();
+    expect((await headers(row)).error?.code).toBe('UNSUBSCRIBE_CHANGED');
+    await env.DB.prepare('UPDATE outreach_jobs SET opt_out_url=? WHERE id=?').bind(row.optOutUrl, row.id).run();
+    await env.DB.prepare('UPDATE pixels SET recipient=? WHERE id=?').bind('changed@example.com', row.pixelId).run();
+    expect((await headers(row)).error?.code).toBe('UNSUBSCRIBE_CHANGED');
+  });
+
+  it('rechecks new suppression and version changes atomically before returning prepared headers', async () => {
+    for (const mutation of ['opt-out', 'edit'] as const) {
+      const row = await ready(`${mutation}@example.com`);
+      let intercepted = false;
+      const DB = { prepare(sql: string) {
+        const statement = env.DB.prepare(sql);
+        if (!sql.startsWith('SELECT j.id FROM outreach_jobs j')) return statement;
+        return { bind(...values: unknown[]) {
+          const bound = statement.bind(...values);
+          return { first: async () => {
+            if (!intercepted) {
+              intercepted = true;
+              if (mutation === 'opt-out') await api('/api/do-not-contact', 'POST', { recipient: row.recipient });
+              else await api(`/api/outreach/${row.id}`, 'PATCH', { version: row.version, body: 'Changed after the first read.' });
+            }
+            return bound.first();
+          } };
+        } } as D1PreparedStatement;
+      }, batch: env.DB.batch.bind(env.DB) } as unknown as D1Database;
+      const result = await headers(row, { DB });
+      expect(intercepted).toBe(true); expect(result.error?.code).toBe('UNSUBSCRIBE_CHANGED');
+      expect(result.data).toBeUndefined();
+    }
+  });
+
+  it('keeps header token export owner-authenticated and blocks already suppressed recipients', async () => {
+    const row = await ready();
+    const production = { ...env, DEV_AUTH: undefined, DASHBOARD_ORIGIN: 'https://maildesk.example.com', ACCESS_TEAM_DOMAIN: 'headers-test.cloudflareaccess.com', ACCESS_AUD: 'headers-audience' };
+    const denied = await fetchDashboard(new Request(`${production.DASHBOARD_ORIGIN}/api/outreach/${row.id}/unsubscribe-headers?version=1`), production);
+    expect(denied.status).toBe(401);
+    await api('/api/do-not-contact', 'POST', { recipient: row.recipient });
+    expect((await headers(row)).error?.code).toBe('DO_NOT_CONTACT');
+  });
+});
 
 describe('planned Outlook time plus 45 seconds', () => {
   it('prepares escaped copy with unique images and recipient-bound opt-outs, without a mailbox or send action', async () => {

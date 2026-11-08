@@ -4,10 +4,14 @@ import { errorResponse, HttpError, json, onlyFields, readJson, securityHeaders, 
 import { cancelInactiveNotifications, dispatchNotifications, enforceRetention } from './notifications';
 import { parseRequestMetadata } from './request-metadata';
 import { dispatchPixelReports, getPixelReport, listReports, queuePixelReports } from './reports';
-import { addDoNotContact, getOrCreateOptOutLink, isDoNotContact, listDoNotContact } from './opt-out';
+import { addDoNotContact, getOrCreateOptOutLink, isDoNotContact, listDoNotContact, normalizedRecipient } from './opt-out';
+import { prepareUnsubscribeHeaders, type ManualPreparedUnsubscribeHeaders } from '../shared/unsubscribe';
 import { outreachApi } from './outreach';
+import { automationApi, runAutomation } from './automation';
+import { mailboxApi } from './mailbox';
+import { mailboxSignalsApi, runMailboxSignals } from './mailbox-signals';
 import { scheduleManualPixel } from './scheduling';
-import type { Bootstrap, Env, LoadEvent, LoadEventPage, PixelStatus } from './types';
+import type { Bootstrap, Env, LoadEvent, LoadEventPage, Pixel, PixelStatus } from './types';
 
 const statuses = new Set<PixelStatus>(['draft', 'armed', 'paused', 'archived']);
 const opaqueId = /^[a-f0-9-]{32,36}$/u;
@@ -77,6 +81,34 @@ async function protectQueuedPixel(env: Env, id: string) {
   if (active) throw new HttpError(409, 'SCHEDULE_MANAGED_PIXEL', 'Cancel or stop this item in Draft review before deleting its image or history.');
 }
 
+async function manualUnsubscribeHeaders(pixel: Pixel, params: URLSearchParams, env: Env): Promise<Response> {
+  if ([...params.keys()].some(key => key !== 'recipient') || params.getAll('recipient').length !== 1) {
+    throw new HttpError(400, 'INVALID_QUERY', 'Confirm the current recipient before preparing email headers.');
+  }
+  const expected = normalizedRecipient(params.get('recipient'));
+  if (expected !== pixel.recipient.trim().toLowerCase()) throw new HttpError(409, 'RECIPIENT_CHANGED', 'The recipient changed. Refresh this message before preparing headers.');
+  if (pixel.outreachId) throw new HttpError(409, 'REVIEW_QUEUE_REQUIRED', 'Prepare headers from the approved version in Draft review for this image.');
+  if (pixel.doNotContact) throw new HttpError(409, 'DO_NOT_CONTACT', 'This address has opted out. Do not send further sales emails.');
+  if (!pixel.optOutUrl) throw new HttpError(409, 'OPT_OUT_NOT_PREPARED', 'Create this recipient’s opt-out link before preparing email headers.');
+  let prepared;
+  try { prepared = prepareUnsubscribeHeaders(pixel.optOutUrl, env.PIXEL_ORIGIN); }
+  catch {
+    throw new HttpError(409, 'INVALID_UNSUBSCRIBE_ORIGIN', 'One-click headers require the HTTPS public origin and this message’s unchanged recipient-bound opt-out link. Local HTTP previews cannot supply production headers.');
+  }
+  // Preserve legacy/manual pairings. A stale pixel response cannot export a
+  // different recipient’s token or bypass the review queue or a new opt-out.
+  const paired = await env.DB.prepare(`SELECT l.token FROM pixels p
+    JOIN opt_out_links l ON l.pixel_id=p.id AND l.recipient=lower(trim(p.recipient)) AND l.token=?
+    WHERE p.id=? AND lower(trim(p.recipient))=?
+      AND NOT EXISTS (SELECT 1 FROM outreach_jobs j WHERE j.pixel_id=p.id)
+      AND NOT EXISTS (SELECT 1 FROM do_not_contact d WHERE d.recipient=lower(trim(p.recipient)))`)
+    .bind(prepared.oneClickUrl.slice(-64), pixel.id, expected).first();
+  if (!paired) throw new HttpError(409, 'UNSUBSCRIBE_CHANGED', 'The recipient pairing or do-not-contact preference changed. Refresh before copying headers.');
+  const result: ManualPreparedUnsubscribeHeaders = { ...prepared, pixelId: pixel.id, recipient: expected,
+    status: 'prepared-only', transportVerified: false, dkimSigningRequired: true };
+  return json(result);
+}
+
 export function csvCell(value: unknown): string {
   let cell = String(value ?? '');
   if (/^[\s]*[=+@-]/u.test(cell) || /^[\t\r\n]/u.test(cell)) cell = `'${cell}`;
@@ -87,6 +119,18 @@ async function api(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
+  if (path === '/api/mailbox' || path.startsWith('/api/mailbox/')) {
+    const response = await mailboxApi(request, env);
+    if (response) return response;
+    throw new HttpError(404, 'NOT_FOUND', 'This mailbox action could not be found.');
+  }
+  if (path === '/api/automation' || path.startsWith('/api/automation/')) {
+    const signals = await mailboxSignalsApi(request, env);
+    if (signals) return signals;
+    const response = await automationApi(request, env);
+    if (response) return response;
+    throw new HttpError(404, 'NOT_FOUND', 'This automatic sending action could not be found.');
+  }
   if (path === '/api/outreach' || path.startsWith('/api/outreach/')) return outreachApi(request, env);
   if (path === '/api/health' && method === 'GET') {
     await env.DB.prepare('SELECT id FROM settings WHERE id=1').first();
@@ -144,6 +188,12 @@ async function api(request: Request, env: Env): Promise<Response> {
     if (method !== 'POST') throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Create the link from your dashboard.');
     onlyFields(await readJson(request), []);
     return json(await getOrCreateOptOutLink(env, pixel.id, pixel.recipient));
+  }
+  const unsubscribe = /^\/api\/pixels\/([^/]+)\/unsubscribe-headers$/u.exec(path);
+  if (unsubscribe) {
+    const pixel = await requirePixel(env, unsubscribe[1]!);
+    if (method !== 'GET') throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Prepare these headers from your dashboard.');
+    return manualUnsubscribeHeaders(pixel, url.searchParams, env);
   }
   const match = /^\/api\/pixels\/([^/]+)(\/(?:events|report))?$/u.exec(path);
   if (match) {
@@ -333,6 +383,14 @@ export async function fetchDashboard(request: Request, env: Env): Promise<Respon
 }
 
 export async function runScheduled(env: Env, time = new Date()): Promise<void> {
+  // Keep each invocation within its own Free-plan database budget. When
+  // connected sending is enabled, odd minutes handle outreach and even minutes
+  // retain reports/alerts. A provider outage cannot starve the legacy phase.
+  if (env.OUTREACH_SENDING_ENABLED === 'true' && time.getUTCMinutes() % 2 === 1) {
+    try { if (await runMailboxSignals(env, time)) await runAutomation(env, time); }
+    catch { console.error('Automatic outreach processing failed; check the private sending log.'); }
+    return;
+  }
   await queuePixelReports(env, time);
   await dispatchPixelReports(env, time);
   await enforceRetention(env, time);

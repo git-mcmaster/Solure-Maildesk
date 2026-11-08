@@ -20,6 +20,7 @@ import type {
 } from "../server/types";
 import { emailContent, imageAddresses, optOutContent, type EmailImageFormat } from "./signature";
 import OutreachQueue from "./OutreachQueue";
+import UnsubscribeSetup from "./UnsubscribeSetup";
 import { scheduleIso } from "./outreach-import";
 
 type IconName =
@@ -1471,6 +1472,7 @@ export default function App() {
                     )}
                     <p className="outreach-footer-note">Visiting the link only opens a confirmation page. The recipient must press “Stop outreach emails” to opt out. Links stay bound to their original address, even if this record changes or is deleted.</p>
                   </section>
+                  {selected.optOutUrl && !selected.outreachId && <UnsubscribeSetup binding={{ kind: "pixel", id: selected.id }} recipient={selected.recipient} optOutUrl={selected.optOutUrl} pixelBaseUrl={data.pixelBaseUrl} disabled={copyBlocked} />}
                   <div className="copy-actions">
                     <button
                       className="button secondary"

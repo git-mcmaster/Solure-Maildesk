@@ -1,5 +1,15 @@
 # Release runbook
 
+## Connected sending — November 8, 2026
+
+The owner approved publishing/deploying the reviewed update with prospect sending disabled, a fresh private backup and migration rehearsal, and preparation of the single-owner Microsoft connection. This does not authorize a real test/prospect send, paid upgrade or granting Microsoft consent without the owner’s review. The exact mailbox-wide read, send-as-self, identity and background permissions are explained in [the connection guide](MICROSOFT_CONNECTION.md).
+
+Pre-release gates passed locally: 279 tests, TypeScript, client build, both Worker dry-run packages, synthetic populated migration rehearsal, native built-Worker HTTP smoke and desktop/narrow UI checks. See [verification](VERIFICATION.md). Source publication, complete CI, current production-data rehearsal, live migration/deployment and authenticated verification are being completed separately; approval alone does not establish those outcomes.
+
+Publish through a reviewable pull request based on current `main`, require full CI and both bundles, then merge the approved scope. Apply additive 0011–0013 only after the fresh populated-data rehearsal preserves every original field. Deploy the public unsubscribe receiver before the dashboard, retaining existing Access, hostnames, mail routing, report sender and billing settings. The dashboard configuration explicitly sets `OUTREACH_SENDING_ENABLED=false`; no mailbox credentials are added to Git.
+
+Verify disabled/disconnected status, safe public unsubscribe GET/HEAD and private-route denial. Prepare the Entra single-tenant registration and show its exact consent to the owner. Actual mailbox consent, an explicitly approved controlled message, preserved Message-ID and signed RFC 8058 fields remain activation gates. Do not schedule prospects or silently adopt existing Outlook drafts. Recovery pauses/disables submissions first and preserves the attempt ledger; do not restore an older database over newer activity as routine rollback.
+
 ## Planned-time tracking — November 6, 2026
 
 The owner explicitly approved simplifying the implementation and publishing it. The release contract is planned Outlook send time plus 45 seconds, enforced on every image request. Maildesk does not send or confirm email and requires no Microsoft connection. Queue import/preparation/exact-version review and manual pixel scheduling share this contract. See [the workflow](SCHEDULED_OUTREACH.md).

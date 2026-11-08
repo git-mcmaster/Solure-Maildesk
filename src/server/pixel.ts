@@ -1,7 +1,7 @@
 import type { Env } from './types';
 import { collectRequestMetadata } from './request-metadata';
 import { brandLogo } from './brand-logo';
-import { fetchOptOut } from './opt-out';
+import { fetchOneClickUnsubscribe, fetchOptOut } from './opt-out';
 
 // One transparent GIF, with identical public responses for known and unknown IDs.
 const image = Uint8Array.from(atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'), (c) => c.charCodeAt(0));
@@ -11,6 +11,7 @@ const previewHeaders = { 'Content-Type': 'image/png', 'Cache-Control': 'public, 
 
 export async function fetchPixel(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
+  if (url.pathname.startsWith('/outreach/unsubscribe/')) return fetchOneClickUnsubscribe(request, env);
   if (url.pathname.startsWith('/outreach/')) return fetchOptOut(request, env);
   const preview = url.pathname === '/brand/solure-logo-v1.png';
   const match = /^\/p\/([a-f0-9]{32})(\.gif|\/logo\.png)$/u.exec(url.pathname);

@@ -1,5 +1,9 @@
 # Planned send time and delayed tracking
 
+## Connected automation status — November 8, local only
+
+The new [connected workflow](AUTOMATION.md) combines preparation, approval, actual Microsoft sending, opt-outs and tracking without a second Outlook schedule. It is implemented locally and has not been released or connected. The manual workflow below continues to describe the deployed system. Do not duplicate a connected send with a manual Outlook schedule or silently adopt another chat’s drafts.
+
 ## What the owner approved
 
 Maildesk stores the time the owner plans to send an email through Outlook and starts recording image requests 45 seconds later. The timestamp is saved in Cloudflare’s database. Every incoming image request checks it, so closing Maildesk, closing the browser or turning off the phone does not stop activation. There is no persistent connection, Microsoft access grant, mailbox polling, Sent Items check or email-sending service.
@@ -20,6 +24,8 @@ Existing pixels also have planned-time controls in their detail view; importing 
 Scheduled image-load emails use the workspace’s Settings. If alerts are already on, the form explains that they apply; it does not offer an individual-message email-off switch. If alerts are paused, resuming them is an explicit unchecked option and affects all active pixels. While a manual pixel is already recording, stop it before creating a new schedule; future schedules can still be changed before recording begins.
 
 ## Timing and safety
+
+The November 8 local one-click unsubscribe extension adds optional provider-header preparation; it does not change this scheduling contract or enable email sending. See [one-click unsubscribe](UNSUBSCRIBE.md) for the separate endpoint and received-message signing requirements. Current Outlook schedules still need to be cancelled in Outlook when a recipient opts out.
 
 Scheduling immediately installs a future activation timestamp and a fresh activation identity. Before that boundary, GIF and logo requests are served normally but save no event, counters or notification. At or after the boundary, an eligible request records activity without waiting for a scheduled task. Rescheduling before activation replaces the old boundary. Cancelling pauses capture and invalidates unaccepted alerts. The workspace email switch does not move a future schedule earlier.
 

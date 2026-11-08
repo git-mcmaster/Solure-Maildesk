@@ -2,3 +2,8 @@
 # No credentials are needed for local dry-run alerts.
 DEV_AUTH=true
 EMAIL_MODE=dry-run
+# Connected prospect sending is separately gated and disabled by default.
+OUTREACH_SENDING_ENABLED=false
+# Microsoft client credentials and the token-encryption key belong in Worker
+# secrets. See docs/MICROSOFT_CONNECTION.md; never paste real values into Git.
+# OUTREACH_TEST_RECIPIENT restricts a later approved rollout to one test inbox.
