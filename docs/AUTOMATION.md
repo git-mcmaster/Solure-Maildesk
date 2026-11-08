@@ -1,6 +1,6 @@
-# Connected sending — November 8, 2026, local implementation
+# Connected sending — November 8, 2026
 
-Maildesk can now prepare, review, schedule and submit approved messages through one owner’s Microsoft mailbox. This upgrade is local and has not been published, migrated into the live database or connected to a real mailbox. The existing live manual Outlook workflow remains separate. See [verification](VERIFICATION.md) for evidence and [Microsoft connection](MICROSOFT_CONNECTION.md) for permissions, secrets and activation.
+Maildesk includes preparation, review, scheduling and submission of approved messages through one owner’s Microsoft mailbox. The upgrade is published and deployed with its additive live migrations, but prospect sending is explicitly disabled. Microsoft registration/consent and credentials remain unfinished, so the mailbox is disconnected. Existing manual Outlook work remains separate. See [verification](VERIFICATION.md) for evidence and [Microsoft connection](MICROSOFT_CONNECTION.md) for permissions, secrets and activation.
 
 ## Everyday workflow
 

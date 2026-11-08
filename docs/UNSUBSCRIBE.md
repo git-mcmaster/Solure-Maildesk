@@ -1,12 +1,12 @@
 # One-click unsubscribe — November 8, 2026
 
-## Connected sending status — November 8, local only
+## Connected sending status — November 8
 
-The local [connected automation](AUTOMATION.md) now inserts these headers into the approved MIME message and checks suppression again immediately before its Microsoft submission. The older receiving-endpoint milestone below did not include that sender. Neither local milestone proves Microsoft’s DKIM coverage of both fields or guarantees a Gmail Unsubscribe button; received-source verification remains required.
+The deployed [connected automation](AUTOMATION.md) can insert these headers into the approved MIME message and check suppression again immediately before its Microsoft submission. Prospect sending is disabled and Microsoft remains disconnected. The older receiving-endpoint milestone below did not include that sender. Neither implementation proves Microsoft’s DKIM coverage of both fields or guarantees a Gmail Unsubscribe button; received-source verification remains required.
 
 ## State and boundaries
 
-Local implementation only. The receiving endpoint and header preparation do not establish deployment, received-header preservation, DKIM coverage, Gmail button display or suppression by an external sender. That receiving extension alone requires no new service, dependency, migration, DNS change or credential. The separate connected-sending upgrade adds Microsoft access and storage as described above. Neither workflow can cancel an independently saved Outlook schedule.
+The receiving endpoint is deployed; header preparation does not establish received-header preservation, DKIM coverage, Gmail button display or suppression by an external sender. That receiving extension alone requires no new service, dependency, migration, DNS change or credential. The separate connected-sending upgrade adds optional Microsoft access and storage as described above. Neither workflow can cancel an independently saved Outlook schedule.
 
 Existing footer URLs, recipient bindings, approved message content, signatures, pixels, timing and access policies are preserved. Legacy manual pixels can reuse their existing tokens without being imported into Review queue.
 
