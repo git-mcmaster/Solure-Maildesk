@@ -2,7 +2,20 @@
 
 ## Connected sending — November 8, 2026
 
+### CI/CD release path
+
+`Check Maildesk` remains the pull-request/main validation workflow and is also reusable by **Release Maildesk**. A release is manually dispatched from `main` with the exact reviewed 40-character commit SHA. The workflow rejects another ref or SHA, reruns complete checks and both bundles, then rejects a main commit superseded during validation. Deployments are serialized and are not cancelled halfway through.
+
+The production job installs the locked toolchain, builds the client, deploys the public collector first and the private dashboard second, and runs `pnpm release:verify`. The verifier uses only anonymous requests, the untracked logo and a random nonexistent opt-out token; it checks private-route redirects, public API denial, GET/HEAD behavior and malformed-POST rejection. It never loads a real pixel, sends mail, authenticates to a mailbox or applies a migration. Eight checks passed against the current live routes while this workflow was prepared.
+
+The production environment needs a dedicated `CLOUDFLARE_API_TOKEN` stored as a GitHub environment secret. The token is available only to the deploy step, not dependency installation or pull-request checks. Microsoft credentials and token-encryption keys remain in Cloudflare; they are not copied into GitHub. Credential provisioning and an actual Actions deployment are still pending at this checkpoint. The production environment’s selected-branch restriction is configured for `main` only. [Cloudflare’s official GitHub Actions guidance](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/).
+
+The checked-in dashboard configuration keeps automatic sending disabled. A release does not authorize prospect mail, apply database changes, change mail DNS/Access, purchase a plan or prove Inbox placement. Review any required migration separately with the existing backup/rehearsal process before dispatching a code release that depends on it. If collector deployment succeeds and dashboard deployment fails, preserve that partial state and fix forward; do not automatically restore an older database or transport.
+
+
 The owner approved publishing/deploying the reviewed update with prospect sending disabled, a fresh private backup and migration rehearsal, and preparation of the single-owner Microsoft connection. This does not authorize a real test/prospect send, paid upgrade or granting Microsoft consent without the owner’s review. The exact mailbox-wide read, send-as-self, identity and background permissions are explained in [the connection guide](MICROSOFT_CONNECTION.md).
+
+Connection and test checkpoint, November 8: registration, all five dashboard secrets and owner-only mailbox consent are verified. The original app credential was retired before use; its owner-created replacement expires May 7, 2027. The later authorized scheduled API test reached Microsoft acceptance and a reconciled sent copy, then received NDR 550 5.7.708. The direct Outlook control reached Gmail Inbox with authentication passing. The Solure Exchange Online Plan 1 subscription is paid and active. Sending is disabled while the API-path failure, Free-plan CPU headroom and received-mail acceptance gates remain unresolved. See [verification](VERIFICATION.md).
 
 Pre-release gates passed locally: 279 tests, TypeScript, client build, both Worker dry-run packages, synthetic populated migration rehearsal, native built-Worker HTTP smoke and desktop/narrow UI checks. [PR #5](https://github.com/git-mcmaster/Solure-Maildesk/pull/5) then passed [complete CI 42468884222](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/42468884222) and merged as `32cc9fad68e48a3e59dc97bfc343f32aedf4fb91`, with the exact reviewed source tree. Fresh production-data rehearsal and post-migration export preserved every existing application record. Live 0011–0013 and collector-first deployment both completed successfully, with prospect sending explicitly disabled. Public/private routing checks passed; authenticated rendering needs fresh owner sign-in. See [verification](VERIFICATION.md).
 

@@ -109,6 +109,18 @@ describe('bounded automatic mailbox checks', () => {
     expect(mailbox.graph.mock.calls[1]![1]).toBe('/me/messages/report/$value');
     expect((await mailboxSignalsStatus(env)).holds[0]?.kind).toBe('bounce');
   });
+  it('verifies the original DSN when Graph omits the report-type parameter', async () => {
+    await delivery();
+    // Observed in the owner-only Exchange test: Graph exposes just the media
+    // type, while the original MIME retains report-type and structured status.
+    const report = { id: 'exchange-ndr', from: { emailAddress: { address: 'postmaster@example.test' } },
+      internetMessageHeaders: [{ name: 'Content-Type', value: 'multipart/report' },
+        { name: 'In-Reply-To', value: originalId }, { name: 'Auto-Submitted', value: 'auto-replied' }] };
+    mailbox.graph.mockResolvedValueOnce(page([report])).mockResolvedValueOnce(new Response(bounce.replace('5.1.1', '5.7.708')));
+    expect(await runMailboxSignals(env, now)).toBe(true);
+    expect((await mailboxSignalsStatus(env)).holds).toMatchObject([{ recipient: reference.recipient, kind: 'bounce' }]);
+    expect(mailbox.graph.mock.calls[1]?.[1]).toBe('/me/messages/exchange-ndr/$value');
+  });
   it('bounds a two-report page and rejects an overfull provider page', async () => {
     await delivery();
     const report = (id: string) => ({ id, internetMessageHeaders: [{ name: 'Content-Type', value: 'multipart/report; report-type=delivery-status' }] });

@@ -151,7 +151,10 @@ export async function runMailboxSignals(env: Env, time = new Date()): Promise<bo
     for (const message of page.value) {
       if (typeof message?.id !== 'string' || message.id.length > 1500) throw new Error('Mailbox message identity unavailable');
       const fields = headers(message);
-      if (/\bmultipart\/report\b.*\breport-type\s*=\s*"?delivery-status/iu.test(fields.get('content-type') ?? '')) {
+      // Graph may omit Content-Type parameters even though the original MIME
+      // retains them. This is only a candidate check; matchedBounce still
+      // requires a delivery-status report, failed recipient and exact identity.
+      if (/\bmultipart\/report\b/iu.test(fields.get('content-type') ?? '')) {
         const mime = await reportPrefix(await mailboxGraphFetch(env, `/me/messages/${encodeURIComponent(message.id)}/$value`));
         const delivery = matchedBounce(mime, sent);
         if (delivery) await saveStops(env, [delivery], 'bounce', message.id, now);
