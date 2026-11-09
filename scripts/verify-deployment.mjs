@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { setTimeout } from 'node:timers/promises';
 
 // This smoke check never uses a real tracking or opt-out capability. It does
 // not sign in, send mail, or apply a database migration.
@@ -14,14 +15,21 @@ assert.ok(asset, 'The built client asset must exist before live verification.');
 
 async function check(name, url, expected, init = {}) {
   try {
-    const response = await fetch(url, {
-      ...init,
-      redirect: 'manual',
-      headers: { 'User-Agent': 'Mozilla/5.0 Solure-Maildesk-Release-Verification/1.0', ...init.headers },
-      signal: AbortSignal.timeout(10000),
-    });
+    let response;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      response = await fetch(url, {
+        ...init,
+        redirect: 'manual',
+        headers: { 'User-Agent': 'Mozilla/5.0 Solure-Maildesk-Release-Verification/1.0', ...init.headers },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (response.status === expected.status || ![429, 502, 503, 504].includes(response.status) || attempt === 3) break;
+      console.warn(`RETRY ${name}: HTTP ${response.status}, attempt ${attempt}/3`);
+      await response.body?.cancel();
+      await setTimeout(attempt * 1000);
+    }
     try {
-      assert.equal(response.status, expected.status, 'Unexpected HTTP status');
+      assert.equal(response.status, expected.status, `Expected HTTP ${expected.status}; received ${response.status}`);
       if (expected.access) {
         const location = response.headers.get('Location');
         assert.ok(location, 'Missing owner-login redirect');
