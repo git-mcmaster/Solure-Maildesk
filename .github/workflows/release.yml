@@ -65,7 +65,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
-          pnpm exec wrangler deploy --config wrangler.pixel.jsonc --message "Reviewed release $GITHUB_SHA"
-          pnpm exec wrangler deploy --config wrangler.dashboard.jsonc --message "Reviewed release $GITHUB_SHA"
+          pnpm release:deploy
       - name: Verify live routing and scanner-safe endpoints
         run: pnpm release:verify

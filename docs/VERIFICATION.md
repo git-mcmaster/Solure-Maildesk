@@ -1,5 +1,13 @@
 # Verification record
 
+## Production pipeline acceptance — November 8, 2026, version-release correction pending
+
+[PR #7](https://github.com/git-mcmaster/Solure-Maildesk/pull/7) merged as `5d5ac96d70a0e2c2bdad06f223101fc5af687da8`, preserving the reviewed tree. Full PR CI passed again after the evidence update. GitHub’s production environment permits only the `main` branch. The owner created an account-owned Cloudflare credential limited to Editor on the two Maildesk Workers, expiring February 6, 2027. It has no DNS/billing/direct database or other-Worker permission. The value was saved as a production environment secret and the temporary local file removed; Microsoft secrets remain in Cloudflare.
+
+The [obsolete-SHA test](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/42546305049) failed the intended validation step and skipped both checking and deployment. The [first valid release](https://github.com/git-mcmaster/Solure-Maildesk/actions/runs/42546410380) passed validation, the full application suite, build and both packages. Its collector upload succeeded, but trigger configuration stopped with Cloudflare error 10084 when ordinary `wrangler deploy` tried to reapply an existing custom domain. The dashboard was not deployed by that attempt. Static-logo HEAD still returned 200 and private-root HEAD still redirected to Access. This is recorded as a partial release, not a successful pipeline.
+
+The correction uses separate version upload and exact 100% version deployment, collector first, preserving existing custom domains and cron triggers without granting broader rights. Four native Node release tests passed locally: invalid commit blocks tooling, missing/ambiguous version blocks deployment, exact versions release in order, and collector failure prevents dashboard operations. Full corrected CI and an actual successful deployment remain pending.
+
 ## Live end-to-end acceptance — November 8, 2026
 
 The owner authorized full end-to-end testing and CI/CD configuration. The exact prepared version 1 of **SOLURE-CONNECT-20261108-A** was compared with its saved complete review, approved and scheduled for **7:43 p.m. America/New_York**, with tracking no earlier than **7:43:45 p.m.** Sending and an owner-Gmail-only restriction were enabled in the same deployment; no other recipient could be submitted. The dashboard was closed during dispatch. Microsoft accepted the sole attempt at **7:43:23.925 p.m.**, the original generated Message-ID was preserved and the ordinary background process observed its Sent Items copy. This establishes submission and a sent copy, not delivery.
