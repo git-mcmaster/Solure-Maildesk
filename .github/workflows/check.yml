@@ -36,4 +36,4 @@ jobs:
       - run: pnpm check
       - run: pnpm bundle:check
       - run: node --check scripts/verify-deployment.mjs
-      - run: node --test scripts/release.test.mjs
+      - run: node --test scripts/release.test.mjs scripts/verify-response.test.mjs
