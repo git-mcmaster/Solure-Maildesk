@@ -13,7 +13,8 @@
     "check": "pnpm typecheck && pnpm test && pnpm build",
     "db:local": "wrangler d1 migrations apply solure-maildesk --local --config wrangler.dashboard.jsonc --persist-to .wrangler/state",
     "bundle:check": "wrangler deploy --dry-run --config wrangler.dashboard.jsonc --outdir dist/dashboard-worker && wrangler deploy --dry-run --config wrangler.pixel.jsonc --outdir dist/pixel-worker",
-    "release:verify": "node scripts/verify-deployment.mjs"
+    "release:verify": "node scripts/verify-deployment.mjs",
+    "release:deploy": "node scripts/release.mjs"
   },
   "dependencies": {
     "jose": "^6.2.15",
